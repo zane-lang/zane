@@ -37,13 +37,13 @@ clean:
 
 # coda's C API as a static library, built from the submodule at vendor/coda.
 # It takes a few seconds, so it is skipped while the library is newer than
-# every coda source.
+# every coda source, and the sources it is built from still exist.
 [unix]
 coda: _submodule
 	#!/bin/sh
 	set -e
 	lib=build/libcoda_ffi.a
-	if [ -f "$lib" ] && [ -z "$(find vendor/coda/src vendor/coda/ffi -newer "$lib" -type f)" ]; then exit 0; fi
+	if [ -f "$lib" ] && [ -f vendor/coda/ffi/coda_ffi_safe.cpp ] && [ -f vendor/coda/ffi/coda_ffi.cpp ] && [ -z "$(find vendor/coda/src vendor/coda/ffi -newer "$lib" -type f)" ]; then exit 0; fi
 	mkdir -p build
 	c++ -O2 -fPIC -std=c++17 -Ivendor/coda/src -Ivendor/coda/ffi -c vendor/coda/ffi/coda_ffi_safe.cpp -o build/coda_ffi.o
 	rm -f "$lib"
@@ -55,7 +55,7 @@ coda: _submodule
 	#!/bin/sh
 	set -e
 	lib=build/coda_ffi.lib
-	if [ -f "$lib" ] && [ -z "$(find vendor/coda/src vendor/coda/ffi -newer "$lib" -type f)" ]; then exit 0; fi
+	if [ -f "$lib" ] && [ -f vendor/coda/ffi/coda_ffi_safe.cpp ] && [ -f vendor/coda/ffi/coda_ffi.cpp ] && [ -z "$(find vendor/coda/src vendor/coda/ffi -newer "$lib" -type f)" ]; then exit 0; fi
 	mkdir -p build
 	cl -nologo -O2 -std:c++17 -EHsc -Ivendor/coda/src -Ivendor/coda/ffi -c vendor/coda/ffi/coda_ffi_safe.cpp -Fo:build/coda_ffi.obj
 	lib -nologo -out:"$lib" build/coda_ffi.obj

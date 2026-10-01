@@ -1,11 +1,17 @@
 name: CI
 
-# Every push to any branch, which covers a pull request's branch too.
-on: push
+# Every push to any branch, which covers a pull request from this repository.
+# A pull request from a fork runs on the pull_request event instead; the jobs
+# skip it for one from this repository, which its push already ran.
+on: [push, pull_request]
+
+permissions:
+  contents: read
 
 jobs:
   # Alpine, because only musl links a fully static binary.
   linux:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container: crystallang/crystal:latest-alpine
     steps:
@@ -27,6 +33,7 @@ jobs:
           path: build/zane
 
   macos:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +54,7 @@ jobs:
           path: build/zane
 
   windows:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: windows-latest
     defaults:
       run:

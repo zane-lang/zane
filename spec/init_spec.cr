@@ -157,6 +157,31 @@ describe Zane::Commands::Init do
     end
   end
 
+  it "takes the directory after --" do
+    with_tmp do |tmp|
+      init(["--no-git", "--", (tmp / "after").to_s])
+      File.exists?(tmp / "after" / "zane.coda").should be_true
+    end
+  end
+
+  it "writes nothing when git is to be used and is not installed" do
+    with_tmp do |tmp|
+      with_toolchains do
+        install("v0.0", V00)
+        path = ENV["PATH"]?
+        ENV["PATH"] = tmp.to_s
+        begin
+          expect_raises(Zane::UserError, "git is not installed; run again with --no-git") do
+            init([(tmp / "app").to_s])
+          end
+        ensure
+          path ? (ENV["PATH"] = path) : ENV.delete("PATH")
+        end
+        File.exists?(tmp / "app").should be_false
+      end
+    end
+  end
+
   it "creates a library whose source file is named after it" do
     with_tmp do |tmp|
       init([(tmp / "geo").to_s, "--lib", "--name", "geometry", "--zane-version", "v0.0", "--no-git"])

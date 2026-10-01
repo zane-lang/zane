@@ -44,7 +44,7 @@ module Zane::Commands
         p.on("--zane-version TAG", "The compiler release to pin, instead of the newest installed or published") { |v| @zane_version = v }
         p.on("--no-git", "Do not create a Git repository") { @git = false }
         p.on("-y", "--yes", "Accept every default") { @yes = true }
-        p.unknown_args { |before, _| dirs.concat(before) }
+        p.unknown_args { |before, after| dirs.concat(before).concat(after) }
         p.invalid_option { |flag| raise UserError.new("unknown option #{flag}\n#{USAGE}") }
         p.missing_option { |flag| raise UserError.new("#{flag} needs a value\n#{USAGE}") }
       end
@@ -66,7 +66,13 @@ module Zane::Commands
       pattern = choose_version_pattern(ask)
       git = choose_git(root, ask)
       release = CompilerRelease.resolve(@zane_version, @compiler_url, @toolchains)
+      if git && !Process.find_executable("git")
+        raise UserError.new("git is not installed; run again with --no-git")
+      end
 
+      # Checked again, since the directory may have changed while the
+      # questions were answered.
+      check_target(root)
       write(root, name, kind, pattern, release)
       init_git(root) if git
 
