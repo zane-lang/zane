@@ -1,0 +1,67 @@
+name: CI
+
+# Every push to any branch, which covers a pull request's branch too.
+on: push
+
+jobs:
+  # Alpine, because only musl links a fully static binary.
+  linux:
+    runs-on: ubuntu-latest
+    container: crystallang/crystal:latest-alpine
+    steps:
+      - run: apk add --no-cache git just g++ file
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - run: just fmt-check
+      - run: just test
+      - run: just release
+      - name: The binary links nothing dynamically
+        run: |
+          file build/zane
+          file build/zane | grep -q 'statically linked'
+      - run: build/zane --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zane-linux-x86_64
+          path: build/zane
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: crystal-lang/install-crystal@v1
+      - uses: extractions/setup-just@v2
+      - run: just test
+      - run: just release
+      - name: The binary links only system libraries
+        run: |
+          otool -L build/zane
+          ! otool -L build/zane | tail -n +2 | grep -v -e '^\s*/usr/lib/' -e '^\s*/System/'
+      - run: build/zane --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zane-macos-arm64
+          path: build/zane
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: crystal-lang/install-crystal@v1
+      - uses: extractions/setup-just@v2
+      - run: just test
+      - run: just release
+      - run: build/zane.exe --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zane-windows-x86_64
+          path: build/zane.exe

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.2/.schema/devbox.schema.json",
+  "packages": {
+    "crystal": "latest",
+    "just": "latest"
+  },
+  "shell": {
+    "scripts": {
+      "test": [
+        "just test"
+      ],
+      "build": [
+        "just build"
+      ]
+    }
+  }
+}
