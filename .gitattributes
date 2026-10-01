@@ -1,0 +1,3 @@
+# Source files stay LF on every system: the templates `zane init` writes are
+# heredocs in them, and a CRLF checkout would write CRLF projects on Windows.
+* text=auto eol=lf
