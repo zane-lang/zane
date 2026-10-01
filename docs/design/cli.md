@@ -73,6 +73,12 @@ Every question has a flag: `--name`, `--lib` / `--app`, `--version-pattern`,
 terminal, `init` asks nothing: it uses the flags and defaults, and fails if a
 default cannot be worked out.
 
+The project is pinned to the newest compiler release, or to the one
+`--zane-version` names. `init` finds it by listing the tags of
+`zane-lang/compiler` with `git ls-remote`, so it needs no API access: the
+highest `vMAJOR.MINOR` tag becomes `zane-version`, and the commit it points to
+becomes the `zane` lock row. With no release published, `init` fails.
+
 `init` writes nothing until every question is answered, so cancelling leaves the
 directory untouched. It then writes:
 
@@ -147,8 +153,8 @@ directory. Under the current spec a package's name is its manifest's `name`
 ([`packages.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#21-the-manifest-names-the-package)),
 so the contract starts with:
 
-- **`--version`** prints the tag and commit the compiler was built from. `init`
-  writes them into `zane-version` and the lock file's `zane` row.
+- **`--version`** prints the tag and commit the compiler was built from, so
+  `zane` can tell whether the compiler it found is the one the project pins.
 - **`--package NAME=DIR`** names a package explicitly. The first one is the
   root.
 - **`--kind application|library`** for the root. An application without `main`
