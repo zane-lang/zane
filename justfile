@@ -42,7 +42,7 @@ clean:
 coda: _submodule
 	#!/bin/sh
 	set -e
-	lib=build/libcoda.a
+	lib=build/libcoda_ffi.a
 	if [ -f "$lib" ] && [ -z "$(find vendor/coda/src vendor/coda/ffi -newer "$lib" -type f)" ]; then exit 0; fi
 	mkdir -p build
 	c++ -O2 -fPIC -std=c++17 -Ivendor/coda/src -Ivendor/coda/ffi -c vendor/coda/ffi/coda_ffi_safe.cpp -o build/coda_ffi.o
@@ -54,7 +54,7 @@ coda: _submodule
 coda: _submodule
 	#!/bin/sh
 	set -e
-	lib=build/coda.lib
+	lib=build/coda_ffi.lib
 	if [ -f "$lib" ] && [ -z "$(find vendor/coda/src vendor/coda/ffi -newer "$lib" -type f)" ]; then exit 0; fi
 	mkdir -p build
 	cl -nologo -O2 -std:c++17 -EHsc -Ivendor/coda/src -Ivendor/coda/ffi -c vendor/coda/ffi/coda_ffi_safe.cpp -Fo:build/coda_ffi.obj

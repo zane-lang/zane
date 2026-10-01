@@ -82,16 +82,16 @@ describe Zane::Commands::Init do
       init([(tmp / "my-app").to_s, "--no-git"])
       root = tmp / "my-app"
 
-      manifest = Zane::Coda::Document.read(root / "zane.coda")
-      manifest.root.keys.should eq ["name", "kind", "zane-version", "version-pattern", "deps"]
-      manifest["name"].as_s.should eq "myApp"
-      manifest["kind"].as_s.should eq "application"
-      manifest["zane-version"].as_s.should eq "v0.1"
-      manifest["version-pattern"].as_s.should eq "v*.+.++"
-      manifest["deps"].rows.should be_empty
+      manifest = read_coda(root / "zane.coda")
+      manifest.keys.should eq ["name", "kind", "zane-version", "version-pattern", "deps"]
+      manifest["name"].should eq "myApp"
+      manifest["kind"].should eq "application"
+      manifest["zane-version"].should eq "v0.1"
+      manifest["version-pattern"].should eq "v*.+.++"
+      manifest["deps"].should eq({"columns" => ["version", "from"], "rows" => {} of String => Hash(String, String)})
 
-      lock = Zane::Coda::Document.read(root / "zane-lock.coda")
-      lock["resolutions"].rows.should eq [{"key" => "zane", "url" => COMPILER, "commit" => V01}]
+      lock = read_coda(root / "zane-lock.coda")
+      lock["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {"zane" => {"url" => COMPILER, "commit" => V01}}})
 
       File.read(root / "src" / "main.zn").should start_with "package myApp;\n"
       File.read(root / ".gitignore").should eq "out/\n"
@@ -102,8 +102,9 @@ describe Zane::Commands::Init do
   it "creates a library whose source file is named after it" do
     with_tmp do |tmp|
       init([(tmp / "geo").to_s, "--lib", "--name", "geometry", "--zane-version", "v0.0", "--no-git"])
-      Zane::Coda::Document.read(tmp / "geo" / "zane.coda")["kind"].as_s.should eq "library"
-      Zane::Coda::Document.read(tmp / "geo" / "zane.coda")["zane-version"].as_s.should eq "v0.0"
+      manifest = read_coda(tmp / "geo" / "zane.coda")
+      manifest["kind"].should eq "library"
+      manifest["zane-version"].should eq "v0.0"
       File.read(tmp / "geo" / "src" / "geometry.zn").should contain "package geometry;"
       File.exists?(tmp / "geo" / "src" / "main.zn").should be_false
     end
@@ -155,10 +156,10 @@ describe Zane::Commands::Init do
       output.should contain "Project name [myTools]: "
       output.should contain "`Bad Name` is not a package name"
       output.should contain "`v*.+.+` is not a version pattern: `+` and `+` share a priority level"
-      manifest = Zane::Coda::Document.read(tmp / "my-tools" / "zane.coda")
-      manifest["name"].as_s.should eq "tools"
-      manifest["kind"].as_s.should eq "library"
-      manifest["version-pattern"].as_s.should eq "v*.+"
+      manifest = read_coda(tmp / "my-tools" / "zane.coda")
+      manifest["name"].should eq "tools"
+      manifest["kind"].should eq "library"
+      manifest["version-pattern"].should eq "v*.+"
       File.exists?(tmp / "my-tools" / ".git").should be_false
     end
   end

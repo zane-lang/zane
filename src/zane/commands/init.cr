@@ -11,6 +11,9 @@ module Zane::Commands
     # target directory.
     ALLOWED = [/\A\.git\z/, /\A\.github\z/, /\AREADME/, /\ALICENSE/, /\ACOPYING/, /\A\.gitignore\z/, /\A\.gitattributes\z/]
 
+    # How the files `zane` writes are indented, as in the spec's examples.
+    INDENT = "    "
+
     USAGE = "usage: zane init [dir] [--name NAME] [--lib | --app] [--version-pattern PATTERN] [--zane-version TAG] [--no-git] [--yes]"
 
     @dir : String = "."
@@ -153,18 +156,22 @@ module Zane::Commands
     private def write(root : Path, name : String, kind : Project::Kind, pattern : String, release : CompilerRelease) : Nil
       Dir.mkdir_p(root / "src")
 
-      manifest = Coda::Document.new
-      manifest["name"] = name
-      manifest["kind"] = kind.to_s
-      manifest["zane-version"] = release.tag
-      manifest["version-pattern"] = pattern
-      manifest.add_table("deps", ["key", "version", "from"])
-      File.write(root / "zane.coda", manifest.to_s)
+      Coda::Doc.new do |doc|
+        manifest = doc.root
+        manifest["name"] = name
+        manifest["kind"] = kind.to_s
+        manifest["zane-version"] = release.tag
+        manifest["version-pattern"] = pattern
+        manifest["deps"] = Coda::KeyedTable.new(["version", "from"])
+        File.write(root / "zane.coda", doc.serialize(INDENT))
+      end
 
-      lock = Coda::Document.new
-      lock.add_table("resolutions", ["key", "url", "commit"])
-        .append_row({"key" => "zane", "url" => @compiler_url, "commit" => release.commit})
-      File.write(root / "zane-lock.coda", lock.to_s)
+      Coda::Doc.new do |doc|
+        resolutions = Coda::KeyedTable.new(["url", "commit"])
+        doc.root["resolutions"] = resolutions
+        resolutions["zane"] = Coda::Row.new.insert("url", @compiler_url).insert("commit", release.commit)
+        File.write(root / "zane-lock.coda", doc.serialize(INDENT))
+      end
 
       if kind.application?
         File.write(root / "src" / "main.zn", application_source(name))

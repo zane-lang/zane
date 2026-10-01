@@ -32,7 +32,7 @@ kind of change that can break a project nobody touched.
 
 `zane` is written in [Crystal](https://crystal-lang.org) for now, and is to be
 ported to Zane once Zane can carry it. It reads and writes `.coda` files
-through the C API of [`zane-lang/coda`](https://github.com/zane-lang/coda),
+through the Crystal binding of [`zane-lang/coda`](https://github.com/zane-lang/coda),
 vendored as a submodule, and it hashes with its own SHA-256, so a release links
 no TLS or crypto library. Downloads go through `curl` and unpacking through
 `tar`, which every supported system ships.
