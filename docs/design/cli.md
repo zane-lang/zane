@@ -73,11 +73,17 @@ Every question has a flag: `--name`, `--lib` / `--app`, `--version-pattern`,
 terminal, `init` asks nothing: it uses the flags and defaults, and fails if a
 default cannot be worked out.
 
-The project is pinned to the newest compiler release, or to the one
-`--zane-version` names. `init` finds it by listing the tags of
-`zane-lang/compiler` with `git ls-remote`, so it needs no API access: the
-highest `vMAJOR.MINOR` tag becomes `zane-version`, and the commit it points to
-becomes the `zane` lock row. With no release published, `init` fails.
+The project is pinned to the newest compiler installed (§4.1), so `init` works
+offline, or to the one `--zane-version` names when that one is installed. Its
+tag becomes `zane-version`, and the commit its toolchain record names becomes
+the `zane` lock row.
+
+With no compiler installed, or not the one named, `init` looks the release up
+online instead, by listing the tags of `zane-lang/compiler` with
+`git ls-remote`, so it needs no API access: the highest `vMAJOR.MINOR` tag, or
+the one named, becomes `zane-version`, and the commit it points to becomes the
+`zane` lock row. With no release published, `init` fails. Either way, it says
+which compiler it pinned and where it found it.
 
 `init` writes nothing until every question is answered, so cancelling leaves the
 directory untouched. It then writes:
@@ -137,12 +143,29 @@ they always change the two files together
 |---|---|
 | `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from`. For a library, has `zanec` write the `!`-prefixed objects for each target, packs one archive per target, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
-| `zane toolchain install` | Installs the compiler the project's `zane-version` names, and verifies it against the `zane` lock row. |
+| `zane toolchain install` | Installs the compiler the project's `zane-version` names (§4.1), and verifies it against the `zane` lock row. |
 | `zane toolchain use <tag>` | Changes `zane-version` and the `zane` lock row together. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists, locates or prunes `~/.zane/packages`. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll` | The compiler's debug views, run on the project. |
 
 What an application's release produces is not designed yet.
+
+### 4.1 Installed toolchains
+
+`zane` keeps what projects share in `~/.zane`, or in the directory `ZANE_HOME`
+names. Each installed compiler is a directory `toolchains/<tag>/` holding the
+compiler and its record, `toolchain.coda`:
+
+```coda
+url https://github.com/zane-lang/compiler
+commit 0123456789abcdef0123456789abcdef01234567
+```
+
+`url` is the repository the compiler was built from, and `commit` the commit
+its tag pointed to, which is what a project's `zane` lock row pins. Installing
+writes the record last, so a directory without one is an interrupted install
+and is ignored, as is a toolchain from another `url`. A toolchain is found from
+its record alone; the compiler is never asked what it is.
 
 ---
 

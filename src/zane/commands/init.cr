@@ -2,6 +2,7 @@ require "option_parser"
 require "../coda"
 require "../compiler_release"
 require "../errors"
+require "../home"
 require "../project"
 
 module Zane::Commands
@@ -26,9 +27,9 @@ module Zane::Commands
 
     # *interactive* says whether questions may be asked; it is false when
     # standard input is not a terminal. *compiler_url* is where releases are
-    # looked up, and is changed only by tests.
+    # looked up and *toolchains* where they are installed; tests change both.
     def initialize(args : Array(String), @input : IO, @output : IO, @interactive : Bool,
-                   @compiler_url : String = CompilerRelease::URL)
+                   @compiler_url : String = CompilerRelease::URL, @toolchains : Path = Home.toolchains)
       parse(args)
     end
 
@@ -40,7 +41,7 @@ module Zane::Commands
         p.on("--lib", "Create a library") { @kind = Project::Kind::Library }
         p.on("--app", "Create an application") { @kind = Project::Kind::Application }
         p.on("--version-pattern PATTERN", "Which of the package's versions are interchangeable") { |v| @version_pattern = v }
-        p.on("--zane-version TAG", "The compiler release to pin, instead of the newest") { |v| @zane_version = v }
+        p.on("--zane-version TAG", "The compiler release to pin, instead of the newest installed or published") { |v| @zane_version = v }
         p.on("--no-git", "Do not create a Git repository") { @git = false }
         p.on("-y", "--yes", "Accept every default") { @yes = true }
         p.unknown_args { |before, _| dirs.concat(before) }
@@ -64,12 +65,19 @@ module Zane::Commands
       kind = choose_kind(ask)
       pattern = choose_version_pattern(ask)
       git = choose_git(root, ask)
-      release = CompilerRelease.resolve(@zane_version, @compiler_url)
+      release = CompilerRelease.resolve(@zane_version, @compiler_url, @toolchains)
 
       write(root, name, kind, pattern, release)
       init_git(root) if git
 
-      @output.puts "Created #{kind} `#{name}` in #{root}, built by the compiler #{release.tag}."
+      which = if @zane_version
+                ""
+              elsif release.installed
+                ", the newest one installed"
+              else
+                ", the newest release"
+              end
+      @output.puts "Created #{kind} `#{name}` in #{root}, built by the compiler #{release.tag}#{which}."
     end
 
     # The directory must hold nothing but what a new repository holds, so that

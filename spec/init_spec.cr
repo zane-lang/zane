@@ -32,10 +32,23 @@ private def with_tmp(&)
   end
 end
 
-private def init(args : Array(String), input = "", interactive = false) : String
+private def init(args : Array(String), input = "", interactive = false, url = COMPILER) : String
   output = IO::Memory.new
-  Zane::Commands::Init.new(args, IO::Memory.new(input), output, interactive, COMPILER).run
+  Zane::Commands::Init.new(args, IO::Memory.new(input), output, interactive, url).run
   output.to_s
+end
+
+# Installs a toolchain as `zane toolchain install` leaves it, under ZANE_HOME.
+private def install(tag : String, commit : String, url = COMPILER, record = true) : Nil
+  dir = Zane::Home.toolchains / tag
+  Dir.mkdir_p(dir)
+  File.write(dir / Zane::CompilerRelease::RECORD, "url #{url}\ncommit #{commit}\n") if record
+end
+
+private def with_toolchains(&)
+  yield
+ensure
+  FileUtils.rm_rf(Zane::Home.dir)
 end
 
 describe Zane::CompilerRelease do
@@ -51,6 +64,37 @@ describe Zane::CompilerRelease do
   it "orders minor versions as numbers" do
     tags = Zane::CompilerRelease.parse("a\trefs/tags/v0.9\nb\trefs/tags/v0.10\nc\trefs/tags/v0.10^{}\n")
     tags.should eq({"v0.9" => "a", "v0.10" => "c"})
+  end
+
+  it "lists the toolchains installed from a repository" do
+    with_toolchains do
+      install("v0.0", V00)
+      install("v0.9", "a")
+      install("v0.10", "b")
+      install("v0.11", "c", record: false)
+      install("v0.12", "d", url: "https://example.com/fork")
+      install("nightly", "e")
+      Zane::CompilerRelease.installed(Zane::Home.toolchains, COMPILER).should eq({"v0.0" => V00, "v0.9" => "a", "v0.10" => "b"})
+      Zane::CompilerRelease.resolve(nil, COMPILER, Zane::Home.toolchains).should eq Zane::CompilerRelease.new("v0.10", "b", true)
+    end
+  end
+
+  it "looks a release up online when it is not installed" do
+    with_toolchains do
+      install("v0.0", V00)
+      Zane::CompilerRelease.resolve("v0.1", COMPILER, Zane::Home.toolchains).should eq Zane::CompilerRelease.new("v0.1", V01)
+      Zane::CompilerRelease.resolve("v0.0", COMPILER, Zane::Home.toolchains).should eq Zane::CompilerRelease.new("v0.0", V00, true)
+    end
+  end
+
+  it "refuses a toolchain record it cannot read" do
+    with_toolchains do
+      install("v0.0", V00, record: false)
+      File.write(Zane::Home.toolchains / "v0.0" / "toolchain.coda", "url #{COMPILER}\n")
+      expect_raises(Zane::UserError, "toolchain.coda is not a toolchain record") do
+        Zane::CompilerRelease.installed(Zane::Home.toolchains, COMPILER)
+      end
+    end
   end
 
   it "refuses a tag that is not a release" do
@@ -79,7 +123,8 @@ end
 describe Zane::Commands::Init do
   it "creates an application with the newest compiler pinned" do
     with_tmp do |tmp|
-      init([(tmp / "my-app").to_s, "--no-git"])
+      output = init([(tmp / "my-app").to_s, "--no-git"])
+      output.should contain "built by the compiler v0.1, the newest release."
       root = tmp / "my-app"
 
       manifest = read_coda(root / "zane.coda")
@@ -96,6 +141,19 @@ describe Zane::Commands::Init do
       File.read(root / "src" / "main.zn").should start_with "package myApp;\n"
       File.read(root / ".gitignore").should eq "out/\n"
       File.exists?(root / ".git").should be_false
+    end
+  end
+
+  it "pins the newest installed compiler without going online" do
+    with_tmp do |tmp|
+      with_toolchains do
+        offline = "https://zane.invalid/compiler"
+        install("v0.0", V00, url: offline)
+        output = init([(tmp / "app").to_s, "--no-git"], url: offline)
+        output.should contain "built by the compiler v0.0, the newest one installed."
+        read_coda(tmp / "app" / "zane-lock.coda")["resolutions"].should eq(
+          {"columns" => ["url", "commit"], "rows" => {"zane" => {"url" => offline, "commit" => V00}}})
+      end
     end
   end
 

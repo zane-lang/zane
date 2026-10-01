@@ -22,3 +22,6 @@ def read_coda(path : Path) : Hash(String, CodaValue)
     end
   end
 end
+
+# Toolchains the specs install go here, never into the real ~/.zane.
+ENV["ZANE_HOME"] = File.join(Dir.tempdir, "zane-spec-home-#{Process.pid}")
