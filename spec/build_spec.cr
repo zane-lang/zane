@@ -24,6 +24,12 @@ private def with_project(kind = "application", deps = "", &)
         key version from
     #{deps}]
     CODA
+  File.write(root / "zane-lock.coda", <<-CODA)
+    resolutions [
+        key url commit
+        zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567
+    ]
+    CODA
   File.write(root / "src" / "main.zn", "package demo;\n")
   log = root / "zanec.log"
   saved = PROJECT_ENV.to_h { |v| {v, ENV[v]?} }
@@ -65,9 +71,9 @@ describe Zane::Workspace do
     end
   end
 
-  it "refuses dependencies, which are not supported yet" do
+  it "refuses a dependency the lock file has no row for" do
     with_project(deps: "    core v1.0 release\n") do |root|
-      expect_raises(Zane::UserError, "dependencies are not supported yet") { Zane::Workspace.find(root) }
+      expect_raises(Zane::UserError, "zane-lock.coda has no row for `core`") { Zane::Workspace.find(root) }
     end
   end
 

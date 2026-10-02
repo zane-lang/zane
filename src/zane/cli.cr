@@ -1,6 +1,7 @@
 require "./version"
 require "./errors"
 require "./commands/build"
+require "./commands/deps"
 require "./commands/init"
 
 module Zane::CLI
@@ -12,6 +13,8 @@ module Zane::CLI
       build        build the program into out/
       run          build the program, then run it
       clean        delete out/
+      add <url>    depend on the library at url, at its newest tag or the one named
+      fetch        fetch what a build needs, so it can then run offline
       help         show this text
       version      show the version of zane
 
@@ -33,6 +36,8 @@ module Zane::CLI
     when "build" then return Commands::Build.new(args[1..], stdout, stderr).run
     when "run"   then return Commands::Run.new(args[1..], stdout, stderr).run
     when "clean" then return Commands::Clean.new(args[1..], stdout, stderr).run
+    when "add"   then return Commands::Add.new(args[1..], stdout, stderr).run
+    when "fetch" then return Commands::Fetch.new(args[1..], stdout, stderr).run
     else
       stderr.puts "zane: unknown command `#{args.first}`"
       stderr.puts USAGE
