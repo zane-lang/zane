@@ -56,22 +56,24 @@ module Zane::Commands
     end
 
     # Builds the application for *target*, the host when nil, into *path*,
-    # and returns the compiler's exit status.
-    private def build(target : String?, path : Path) : Int32
+    # and returns the compiler's exit status. A program means the same
+    # optimized or not, so *optimize* trades only build time for speed.
+    private def build(target : String?, path : Path, optimize : Bool) : Int32
       if workspace.kind.library?
         raise UserError.new("`#{workspace.name}` is a library, which is not built into a program; check it with `zane check`")
       end
       Dir.mkdir_p(path.parent)
       args = ["--build", path.to_s]
       args.push("--target", target) if target
+      args << "--optimize" if optimize
       compiler.run(args + project_flags, @output, @error)
     end
 
-    # Where a build goes when `-o` does not say: `out/<target>/<name>`, with
-    # `host` standing for the machine `zane` runs on.
-    private def default_output(target : String?) : Path
+    # The program's file in `out/<dir>/`, named for the package, with `.exe`
+    # when *target* (the host when nil) is Windows.
+    private def output_in(dir : String, target : String?) : Path
       windows = target ? target.includes?("windows") : {{ flag?(:win32) }}
-      workspace.out_dir / (target || "host") / (windows ? "#{workspace.name}.exe" : workspace.name)
+      workspace.out_dir / dir / (windows ? "#{workspace.name}.exe" : workspace.name)
     end
 
     abstract def run : Int32
@@ -103,8 +105,8 @@ module Zane::Commands
     end
 
     def run : Int32
-      path = @path || default_output(@target)
-      status = build(@target, path)
+      path = @path || output_in(@target || "host", @target)
+      status = build(@target, path, optimize: true)
       @output.puts "Built #{shown(path)}" if status == 0
       status
     end
@@ -114,8 +116,10 @@ module Zane::Commands
     end
   end
 
-  # `zane run [-- ARGS]` (§2.4): builds for the host, then runs the program
-  # with *ARGS* and exits with its status.
+  # `zane run [-- ARGS]` (§2.4): builds for the host without optimizing,
+  # which is the faster build, then runs the program with *ARGS* and exits
+  # with its status. It builds into `out/run/`, so it never replaces what
+  # `zane build` made.
   class Run < ProjectCommand
     @program_args = [] of String
 
@@ -128,8 +132,8 @@ module Zane::Commands
     end
 
     def run : Int32
-      path = default_output(nil)
-      status = build(nil, path)
+      path = output_in("run", nil)
+      status = build(nil, path, optimize: false)
       return status unless status == 0
       Compiler.exit_code(Process.run(path.to_s, @program_args,
         input: Process::Redirect::Inherit, output: @output, error: @error))

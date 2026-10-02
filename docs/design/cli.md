@@ -108,15 +108,17 @@ Resolves and fetches dependencies
 ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)),
 then has `zanec` compile the project and link it. The output goes to
 `out/<target>/<name>` unless `-o` says otherwise, with `out/host/<name>` when
-no target is given. `T` is an LLVM target triple and defaults to the host. A
+no target is given. The program is optimized. `T` is an LLVM target triple and defaults to the host. A
 dependency with no artifact for `T` stops the build with an error that names it
 and suggests `from source`. A library is refused: it is checked with `check`
 and published with `release`.
 
 ### 2.4 `zane run [-- ARGS]`
 
-Builds for the host, then runs the program with `ARGS` and exits with its
-status. It refuses a library.
+Builds for the host into `out/run/<name>`, then runs the program with `ARGS`
+and exits with its status. It does not optimize, which makes the build about
+three times faster; the program means the same either way, so only its speed
+differs from what `build` makes. It refuses a library.
 
 ### 2.5 `zane clean`
 
@@ -185,9 +187,9 @@ which only `zane` reads, so the contract is:
 - **`--kind application|library`** for the root. An application without `main`
   is a compile-time error
   ([`packages.md` §6.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#62-main-is-the-entry-point)).
-- **`--check`**, **`--build OUT`** and **`--target T`**.
+- **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
 
-`zanec` has these since zane-lang/compiler#147.
+`zanec` has these since zane-lang/compiler#147, and `--optimize` since #148.
 
 A `.zn` file in a subdirectory of `src/` is an error. `zane` reports it before
 calling the compiler, since it is the one listing the files.

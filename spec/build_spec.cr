@@ -129,9 +129,9 @@ describe Zane::Commands do
       zane(Zane::Commands::Build, ["--target", "aarch64-unknown-linux-gnu"], root)[0].should eq 0
       zane(Zane::Commands::Build, ["--target", "x86_64-pc-windows-msvc"], root)[0].should eq 0
       logged(log).should eq [
-        "--build #{host} --kind application --package demo=#{root / "src"}",
-        "--build #{root / "out" / "aarch64-unknown-linux-gnu" / "demo"} --target aarch64-unknown-linux-gnu --kind application --package demo=#{root / "src"}",
-        "--build #{root / "out" / "x86_64-pc-windows-msvc" / "demo.exe"} --target x86_64-pc-windows-msvc --kind application --package demo=#{root / "src"}",
+        "--build #{host} --optimize --kind application --package demo=#{root / "src"}",
+        "--build #{root / "out" / "aarch64-unknown-linux-gnu" / "demo"} --target aarch64-unknown-linux-gnu --optimize --kind application --package demo=#{root / "src"}",
+        "--build #{root / "out" / "x86_64-pc-windows-msvc" / "demo.exe"} --target x86_64-pc-windows-msvc --optimize --kind application --package demo=#{root / "src"}",
       ]
     end
   end
@@ -153,10 +153,12 @@ describe Zane::Commands do
     end
   end
 
-  it "runs the program with the arguments after --, and exits with its status" do
-    with_project do |root|
+  it "runs the program, built unoptimized into out/run, with the arguments after --" do
+    with_project do |root, log|
       ENV["FAKE_PROGRAM_STATUS"] = "3"
       zane(Zane::Commands::Run, ["--", "a", "--b"], root).should eq({3, "program ran with [a, --b]\n", ""})
+      program = root / "out" / "run" / {{ flag?(:win32) ? "demo.exe" : "demo" }}
+      logged(log).should eq ["--build #{program} --kind application --package demo=#{root / "src"}"]
     end
   end
 
@@ -164,8 +166,7 @@ describe Zane::Commands do
     with_project do |root|
       ENV["FAKE_ZANEC_STATUS"] = "1"
       zane(Zane::Commands::Run, [] of String, root)[0].should eq 1
-      File.exists?(root / "out" / "host").should be_true
-      Dir.children(root / "out" / "host").should be_empty
+      Dir.children(root / "out" / "run").should be_empty
     end
   end
 
