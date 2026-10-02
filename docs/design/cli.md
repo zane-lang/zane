@@ -98,20 +98,27 @@ directory untouched. It then writes:
 ### 2.2 `zane check`
 
 Runs the compiler up to and including semantic checking and stops. This is the
-fast loop while editing.
+fast loop while editing. It works from any directory inside the project, as
+every command below does: `zane` looks for `zane.coda` there and in each
+directory above.
 
 ### 2.3 `zane build [--target T] [-o OUT]`
 
 Resolves and fetches dependencies
 ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)),
 then has `zanec` compile the project and link it. The output goes to
-`out/<target>/<name>` unless `-o` says otherwise. `T` is an LLVM target triple
-and defaults to the host. A dependency with no artifact for `T` stops the build
-with an error that names it and suggests `from source`.
+`out/<target>/<name>` unless `-o` says otherwise, with `out/host/<name>` when
+no target is given. The program is optimized. `T` is an LLVM target triple and defaults to the host. A
+dependency with no artifact for `T` stops the build with an error that names it
+and suggests `from source`. A library is refused: it is checked with `check`
+and published with `release`.
 
-### 2.4 `zane run`
+### 2.4 `zane run [-- ARGS]`
 
-Builds for the host, then runs the program. It refuses a library.
+Builds for the host into `out/run/<name>`, then runs the program with `ARGS`
+and exits with its status. It does not optimize, which makes the build about
+three times faster; the program means the same either way, so only its speed
+differs from what `build` makes. It refuses a library.
 
 ### 2.5 `zane clean`
 
@@ -154,7 +161,7 @@ What an application's release produces is not designed yet.
 
 `zane` keeps what projects share in `~/.zane`, or in the directory `ZANE_HOME`
 names. Each installed compiler is a directory `toolchains/<tag>/` holding the
-compiler and its record, `toolchain.coda`:
+compiler at `bin/zanec` and its record, `toolchain.coda`:
 
 ```coda
 url https://github.com/zane-lang/compiler
@@ -171,19 +178,18 @@ its record alone; the compiler is never asked what it is.
 
 ## 5. What `zane` needs from `zanec`
 
-The compiler today takes each package as `--package DIR` and names it after the
-directory. Under the current spec a package's name is its manifest's `name`
+A package's name is its manifest's `name`
 ([`packages.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#21-the-manifest-names-the-package)),
-so the contract starts with:
+which only `zane` reads, so the contract is:
 
-- **`--version`** prints the tag and commit the compiler was built from, so
-  `zane` can tell whether the compiler it found is the one the project pins.
 - **`--package NAME=DIR`** names a package explicitly. The first one is the
   root.
 - **`--kind application|library`** for the root. An application without `main`
   is a compile-time error
   ([`packages.md` §6.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#62-main-is-the-entry-point)).
-- **`--check`**, **`--build OUT`** and **`--target T`**.
+- **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
+
+`zanec` has these since zane-lang/compiler#147, and `--optimize` since #148.
 
 A `.zn` file in a subdirectory of `src/` is an error. `zane` reports it before
 calling the compiler, since it is the one listing the files.
@@ -204,6 +210,7 @@ it describes.
 4. **Toolchains.** `toolchain install` and `use`, once the compiler publishes
    releases, starting with `v0.0`.
 
-Until phase 4, `zane` runs the `zanec` it finds through `ZANE_COMPILER` or on
-`PATH`, and warns when its `--version` differs from the project's
-`zane-version`.
+`zane` runs the first compiler it finds of: the one `ZANE_COMPILER` names, the
+toolchain installed for the project's `zane-version` (§4.1), and `zanec` on
+`PATH`. Until phase 4 installs toolchains, that is the first or the last, and
+which version it is goes unchecked.

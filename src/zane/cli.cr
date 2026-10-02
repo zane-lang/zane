@@ -1,5 +1,6 @@
 require "./version"
 require "./errors"
+require "./commands/build"
 require "./commands/init"
 
 module Zane::CLI
@@ -7,6 +8,10 @@ module Zane::CLI
     usage: zane <command> [arguments]
 
       init [dir]   create a project in dir, or in the current directory
+      check        check the project without building it
+      build        build the program into out/
+      run          build the program, then run it
+      clean        delete out/
       help         show this text
       version      show the version of zane
 
@@ -24,6 +29,10 @@ module Zane::CLI
       stdout.puts "zane #{VERSION}"
     when "init"
       Commands::Init.new(args[1..], stdin, stdout, interactive).run
+    when "check" then return Commands::Check.new(args[1..], stdout, stderr).run
+    when "build" then return Commands::Build.new(args[1..], stdout, stderr).run
+    when "run"   then return Commands::Run.new(args[1..], stdout, stderr).run
+    when "clean" then return Commands::Clean.new(args[1..], stdout, stderr).run
     else
       stderr.puts "zane: unknown command `#{args.first}`"
       stderr.puts USAGE
