@@ -69,7 +69,7 @@ module Zane
       end
       Dir.each_child(source_dir) do |entry|
         dir = source_dir / entry
-        next unless File.directory?(dir)
+        next unless real_directory?(dir)
         if source = first_source(dir)
           raise UserError.new("#{source} is in a subdirectory of src/; a package's sources go directly in src/")
         end
@@ -80,11 +80,16 @@ module Zane
       Dir.each_child(dir) do |entry|
         path = dir / entry
         return path if entry.ends_with?(".zn") && File.file?(path)
-        if File.directory?(path) && (found = first_source(path))
+        if real_directory?(path) && (found = first_source(path))
           return found
         end
       end
       nil
+    end
+
+    # A directory that is not a symbolic link, so following one cannot loop.
+    private def real_directory?(path : Path) : Bool
+      File.info?(path, follow_symlinks: false).try(&.directory?) || false
     end
   end
 end

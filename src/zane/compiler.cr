@@ -21,9 +21,8 @@ module Zane
         return new(path) if File.file?(path)
         raise UserError.new("ZANE_COMPILER names #{path}, which is not a file")
       end
-      toolchain = toolchains / zane_version
-      installed = toolchain / "bin" / EXECUTABLE
-      if File.file?(toolchain / CompilerRelease::RECORD) && File.file?(installed)
+      installed = toolchains / zane_version / "bin" / EXECUTABLE
+      if CompilerRelease.installed(toolchains).has_key?(zane_version) && File.file?(installed)
         return new(installed.to_s)
       end
       if found = Process.find_executable("zanec")
@@ -37,7 +36,15 @@ module Zane
     # Runs the compiler, its output going to *output* and *error*, and
     # returns its exit status.
     def run(args : Array(String), output : IO, error : IO) : Int32
-      Compiler.exit_code(Process.run(@path, args, output: output, error: error))
+      Compiler.launch(@path, args, output: output, error: error)
+    end
+
+    # Runs the program at *path* to its end and returns its exit code, or
+    # raises a UserError when it cannot be started at all.
+    def self.launch(path : String, args : Array(String), **options) : Int32
+      exit_code(Process.run(path, args, **options))
+    rescue error : IO::Error
+      raise UserError.new("cannot run #{path}: #{error.message}")
     end
 
     # A finished process's status as an exit code; one a signal ended is

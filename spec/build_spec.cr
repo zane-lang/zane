@@ -8,6 +8,9 @@ FAKE_ZANEC = begin
   path
 end
 
+# The variables a project example sets, restored after it.
+PROJECT_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS)
+
 private def with_project(kind = "application", deps = "", &)
   root = Path[File.join(Dir.tempdir, "zane-spec-#{Random::Secure.hex(6)}")]
   Dir.mkdir_p(root / "src")
@@ -23,12 +26,13 @@ private def with_project(kind = "application", deps = "", &)
     CODA
   File.write(root / "src" / "main.zn", "package demo;\n")
   log = root / "zanec.log"
+  saved = PROJECT_ENV.to_h { |v| {v, ENV[v]?} }
   ENV["ZANE_COMPILER"] = FAKE_ZANEC
   ENV["FAKE_ZANEC_LOG"] = log.to_s
   begin
     yield root, log
   ensure
-    %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS).each { |v| ENV.delete(v) }
+    saved.each { |v, value| value ? (ENV[v] = value) : ENV.delete(v) }
     FileUtils.rm_rf(root)
   end
 end
@@ -76,6 +80,16 @@ describe Zane::Workspace do
       end
     end
   end
+
+  {% unless flag?(:win32) %}
+    it "does not follow a symbolic link that loops back into src/" do
+      with_project do |root|
+        Dir.mkdir_p(root / "src" / "nested")
+        File.symlink(root / "src", root / "src" / "nested" / "back")
+        Zane::Workspace.find(root).check_sources
+      end
+    end
+  {% end %}
 end
 
 describe Zane::Compiler do
@@ -87,24 +101,37 @@ describe Zane::Compiler do
 
   it "takes the toolchain installed for the project's version, then PATH" do
     home = Path[File.join(Dir.tempdir, "zane-spec-toolchains-#{Random::Secure.hex(4)}")]
-    path = ENV["PATH"]?
+    path, compiler = ENV["PATH"]?, ENV["ZANE_COMPILER"]?
     begin
+      ENV.delete("ZANE_COMPILER")
       ENV["PATH"] = home.to_s
       expect_raises(Zane::UserError, "the compiler v0.1, which is not installed, and no zanec is on PATH") do
         Zane::Compiler.locate("v0.1", home)
       end
       Dir.mkdir_p(home / "v0.1" / "bin")
       File.copy(FAKE_ZANEC, home / "v0.1" / "bin" / Zane::Compiler::EXECUTABLE)
-      File.write(home / "v0.1" / Zane::CompilerRelease::RECORD, "url u\ncommit c\n")
+      File.write(home / "v0.1" / Zane::CompilerRelease::RECORD, "url https://example.com/other\ncommit c\n")
+      expect_raises(Zane::UserError, "no zanec is on PATH") { Zane::Compiler.locate("v0.1", home) }
+      File.write(home / "v0.1" / Zane::CompilerRelease::RECORD, "url #{Zane::CompilerRelease::URL}\ncommit c\n")
       Zane::Compiler.locate("v0.1", home).path.should eq (home / "v0.1" / "bin" / Zane::Compiler::EXECUTABLE).to_s
     ensure
       path ? (ENV["PATH"] = path) : ENV.delete("PATH")
+      compiler ? (ENV["ZANE_COMPILER"] = compiler) : ENV.delete("ZANE_COMPILER")
       FileUtils.rm_rf(home)
     end
   end
 end
 
 describe Zane::Commands do
+  it "reports a compiler that cannot be started" do
+    with_project do |root|
+      ENV["ZANE_COMPILER"] = (root / "zane.coda").to_s
+      expect_raises(Zane::UserError, "cannot run #{root / "zane.coda"}") do
+        zane(Zane::Commands::Check, [] of String, root)
+      end
+    end
+  end
+
   it "checks the project as one package named by its manifest" do
     with_project do |root, log|
       zane(Zane::Commands::Check, [] of String, root / "src").should eq({0, "", ""})

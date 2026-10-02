@@ -135,8 +135,8 @@ module Zane::Commands
       path = output_in("run", nil)
       status = build(nil, path, optimize: false)
       return status unless status == 0
-      Compiler.exit_code(Process.run(path.to_s, @program_args,
-        input: Process::Redirect::Inherit, output: @output, error: @error))
+      Compiler.launch(path.to_s, @program_args,
+        input: Process::Redirect::Inherit, output: @output, error: @error)
     end
   end
 
@@ -148,8 +148,10 @@ module Zane::Commands
 
     def run : Int32
       built = Workspace.find(@dir).out_dir
-      FileUtils.rm_rf(built) if Dir.exists?(built)
+      FileUtils.rm_r(built) if Dir.exists?(built)
       0
+    rescue error : File::Error
+      raise UserError.new("cannot remove #{error.file}: #{error.os_error.try(&.message) || error.message}")
     end
   end
 end
