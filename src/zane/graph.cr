@@ -80,8 +80,7 @@ module Zane
         unless File.file?(dir / Manifest::FILE)
           raise UserError.new("`#{dep.key}` comes from #{dep.from}, which holds no #{Manifest::FILE}")
         end
-        return Package.new(dep.key, "", url, dep.version, resolution.commit, from, Manifest.load(dir), nil)
-          .tap { |p| named(p) }
+        return named(Package.new(dep.key, "", url, dep.version, resolution.commit, from, Manifest.load(dir), nil))
       end
       entry = CacheEntry.new(url, dep.version, @packages_dir)
       src = entry.source(resolution.commit)

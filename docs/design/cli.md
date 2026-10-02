@@ -159,7 +159,7 @@ its pinned commit ([`dependencies.md` §13](https://github.com/zane-lang/spec/bl
 Only `check` stops before the objects: it needs the sources alone.
 
 - **Sources.** Each version of each package is cloned at its tag into the
-  cache, `~/.zane/packages/<host>/<path>/<tag>/src/`, and refused with a
+  cache, `~/.zane/packages/<normalized url>/<tag>/src/`, and refused with a
   security error unless the tag is the commit the lock file pins
   ([§4](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#4-tag-and-commit-verification)).
   A checkout already in the cache at the pinned commit is used without going

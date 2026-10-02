@@ -283,6 +283,21 @@ describe Zane::Commands::Add do
     end
   end
 
+  it "compiles a path dependency with the project, and fetches what it depends on" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      commit = registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}])
+      local = registry.dir / "shapes"
+      File.write(project / "zane.coda", File.read(project / "zane.coda").sub("]", "    shapes v2.0 #{local.relative_to(project).to_posix}\n]"))
+      File.write(project / "zane-lock.coda", File.read(project / "zane-lock.coda").sub(/\]\n\z/, "    shapes #{registry.url("shapes")} #{commit}\n]\n"))
+      zane(["build"], project)[0].should eq 0
+      File.read_lines(log).last.should end_with(
+        "--package shapes=#{local / "src"} --package math=#{entry("math", "v1.0") / "src" / "src"} " \
+        "--stamp math=#{registry.stamp("math", "v1.0")} --link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"}")
+      Dir.exists?(entry("shapes", "v2.0")).should be_false
+    end
+  end
+
   it "refuses an archive whose hash is not the committed one, and writes nothing" do
     with_registry do |registry, project|
       registry.publish("math", "v1.0")

@@ -104,11 +104,21 @@ module Zane::Commands
       lock = edit(root / Manifest::LOCK) do |doc|
         doc.root["resolutions"].as_keyed_table[dep.key] = Coda::Row.new.insert("url", url).insert("commit", commit)
       end
+      # The manifest is kept until the lock is in place, and put back if the
+      # lock cannot be, so the two files never disagree.
+      backup = root / ".#{Manifest::FILE}.#{Random::Secure.hex(4)}"
+      File.copy(root / Manifest::FILE, backup)
       File.rename(manifest, root / Manifest::FILE)
-      File.rename(lock, root / Manifest::LOCK)
+      begin
+        File.rename(lock, root / Manifest::LOCK)
+      rescue error : File::Error
+        File.rename(backup, root / Manifest::FILE)
+        raise UserError.new("cannot write #{root / Manifest::LOCK}: #{error.message}; nothing was changed")
+      end
     ensure
       File.delete?(manifest) if manifest
       File.delete?(lock) if lock
+      File.delete?(backup) if backup
     end
 
     private def edit(path : Path, & : Coda::Doc ->) : Path
