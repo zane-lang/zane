@@ -420,12 +420,16 @@ module Zane::Commands
         last = i == edges.size - 1
         package = edge.package
         chosen = graph.chosen(package)
-        again = !chosen && shown.includes?(package.node)
-        note = chosen ? " (remapped onto #{chosen.tag})" : again ? " (see above)" : ""
+        resolved = chosen || package
+        again = shown.includes?(resolved.node)
+        notes = [] of String
+        notes << "remapped onto #{resolved.tag}" if chosen
+        notes << "see above" if again
+        note = notes.empty? ? "" : " (#{notes.join(", ")})"
         @output.puts "#{indent}#{last ? "└── " : "├── "}#{line(edge.key, package)}#{note}"
-        next if chosen || again
-        shown << package.node
-        print(graph.dependencies(package), indent + (last ? "    " : "│   "), shown)
+        next if again
+        shown << resolved.node
+        print(graph.dependencies(resolved), indent + (last ? "    " : "│   "), shown)
       end
     end
 

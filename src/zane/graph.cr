@@ -311,12 +311,15 @@ module Zane
       objects.map_with_index do |object, i|
         dest = dir / "#{i}-#{object.basename}"
         input = object
-        pairs.each do |from, to|
+        # Each pass writes a file of its own, so no pass reads what it writes.
+        pairs.each_with_index do |(from, to), j|
+          output = j == pairs.size - 1 ? dest : dir / ".#{i}-#{j}-#{object.basename}"
           error = IO::Memory.new
-          unless compiler.run(["--remap", from, to, input.to_s, dest.to_s], error, error) == 0
+          unless compiler.run(["--remap", from, to, input.to_s, output.to_s], error, error) == 0
             raise UserError.new("the compiler could not remap #{object}:\n#{error.to_s.strip}")
           end
-          input = dest
+          File.delete(input) unless input == object
+          input = output
         end
         dest
       end

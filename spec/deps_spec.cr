@@ -657,3 +657,35 @@ describe Zane::Graph do
     end
   end
 end
+
+describe "remapping more than one version" do
+  it "remaps each object once per displaced version, each pass into a file of its own" do
+    with_registry do |registry, project, log|
+      registry.publish("util", "v1.0")
+      registry.publish("math", "v1.0.0")
+      registry.publish("math", "v1.1.0")
+      registry.publish("math", "v1.2.0", deps: [{"util", "v1.0"}])
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0.0"}])
+      registry.publish("plot", "v1.0", deps: [{"math", "v1.1.0"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["add", registry.url("plot")], project)[0].should eq 0
+      zane(["add", registry.url("math"), "v1.2.0"], project)[0].should eq 0
+      zane(["remap", registry.url("math")], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+
+      remaps = File.read_lines(log).select(&.starts_with?("--remap"))
+      remaps.each { |line| _, _, _, input, output = line.split(' '); input.should_not eq output }
+      remapped = project / "out" / "remapped" / Zane::Target::HOST
+      Dir.children(remapped).sort.should eq ["0-util.o", "1-math.o", "2-shapes.o", "3-plot.o"]
+      File.read(remapped / "2-shapes.o").lines.count(&.starts_with?("remapped ")).should eq 2
+
+      tree = zane(["tree"], project)[1]
+      tree.should contain <<-TEXT
+        ├── shapes v1.0, https://example.com/shapes, prebuilt
+        │   └── math v1.0.0, https://example.com/math, prebuilt (remapped onto v1.2.0)
+        │       └── util v1.0, https://example.com/util, prebuilt
+        TEXT
+      tree.should contain "└── math v1.2.0, https://example.com/math, prebuilt (see above)"
+    end
+  end
+end
