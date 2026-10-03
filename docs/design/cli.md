@@ -34,8 +34,10 @@ kind of change that can break a project nobody touched.
 ported to Zane once Zane can carry it. It reads and writes `.coda` files
 through the Crystal binding of [`zane-lang/coda`](https://github.com/zane-lang/coda),
 vendored as a submodule, and it hashes with its own SHA-256, so a release links
-no TLS or crypto library. Downloads go through `curl` and unpacking through
-`tar`, which every supported system ships.
+no TLS or crypto library. Repositories are fetched with `git` and archives
+downloaded with `curl`, which every supported system ships. `zane` reads a release archive's tar format
+itself, decompressing it with the zlib Crystal links, so that it checks every
+entry before it writes anything (§3.1).
 
 ---
 
@@ -108,10 +110,14 @@ Resolves and fetches dependencies
 ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)),
 then has `zanec` compile the project and link it. The output goes to
 `out/<target>/<name>` unless `-o` says otherwise, with `out/host/<name>` when
-no target is given. The program is optimized. `T` is an LLVM target triple and defaults to the host. A
-dependency with no artifact for `T` stops the build with an error that names it
-and suggests `from source`. A library is refused: it is checked with `check`
-and published with `release`.
+no target is given. The program is optimized. `T` is a target triple, spelled
+as `zig cc` reads it, such as `x86_64-windows-gnu`
+([compiler `platforms.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/platforms.md)),
+and defaults to the host, which `zane` names the same way: `x86_64-linux-gnu`,
+`aarch64-macos`, and so on. That name is the row it looks up in a library's
+`zane-artifacts.coda`. A dependency with no artifact for `T` stops the build
+with an error that names it and suggests `from source`. A library is refused:
+it is checked with `check` and published with `release`.
 
 ### 2.4 `zane run [-- ARGS]`
 
@@ -134,13 +140,61 @@ they always change the two files together
 
 | Command | Does |
 |---|---|
-| `zane add <url> [tag] [--as key] [--from-source]` | Resolves the tag, newest when omitted, and pins its commit. The key defaults to the last part of the URL path. Fetches the host target's archive at once, so a missing artifact shows up immediately. Refuses a package whose `kind` is `application`. Prints the `import` line to use. |
+| `zane add <url> [tag] [--as key] [--from-source]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Fetches the library and everything it depends on for the host before writing either file, so a missing artifact shows up immediately and a library that cannot be used is never recorded. Refuses a package whose `kind` is `application`. Prints the `import` line to use. |
 | `zane remove <key>` | Removes the key from both files, and warns about source files that still import it. |
 | `zane update [key [tag]] [--accept-tag-move]` | Re-resolves one key, or every key. A tag that moved is refused without the flag. |
 | `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local path, or back to `release`. |
 | `zane remap <url>` / `zane unremap <url>` | Edits the `remaps` list. |
 | `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. |
 | `zane tree [--target T]` | Prints the resolved graph: versions linked side by side, versions collapsed by remapping, and where each package's code comes from. |
+
+`add` and `fetch` are built, and `check`, `build` and `run` resolve and fetch
+the graph as §3.1 says. The others are still to come.
+
+### 3.1 Fetching
+
+`check`, `build`, `run`, `fetch` and `add` each read the graph from the
+project's two files and, recursively, from each dependency's own two files at
+its pinned commit ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)).
+Only `check` stops before the objects: it needs the sources alone.
+
+- **Sources.** Each version of each package is cloned at its tag into the
+  cache, `~/.zane/packages/<normalized url>/<tag>/src/`, and refused with a
+  security error unless the tag is the commit the lock file pins
+  ([§4](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#4-tag-and-commit-verification)).
+  A checkout already in the cache at the pinned commit is used without going
+  online. The commit fixes what the checkout holds, so a tag that moved since
+  cannot change it, and builds work offline once `zane fetch` has run.
+- **Archives.** For a `release` dependency, `zane` reads the target's row of
+  the checkout's `zane-artifacts.coda`, downloads its URL with
+  `curl --proto =https --proto-redir =https`, and refuses the file unless its
+  SHA-256 is the committed one
+  ([§5](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#5-fetching)).
+  It then unpacks the archive into `artifacts/<target>/build/`, refusing it
+  whole if any entry is not a directory or regular file under `build/`.
+- **Rewriting.** `zanec --rewrite` (§5) turns each object's placeholder into
+  the package's stamp, into `build/<target>/`. Last, `zane` writes
+  `build/<target>.coda`, recording the commit, target, archive hash and
+  compiler pin (`zane-version` and the `zane` lock row's commit) the objects
+  were made with. The objects are reused only while all five match;
+  otherwise they are rewritten again, from the kept archive when its hash
+  still matches.
+- **Linking.** The compiler is given every package with `--package`, each
+  `release` one's stamp with `--stamp`, and its rewritten objects with
+  `--link`. A `source` or path dependency gets no stamp, so the compiler
+  compiles it with the project
+  ([compiler `separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md)
+  C1).
+
+Each part of a cache entry is made beside where it goes and renamed into place
+once whole, so an interrupted fetch leaves nothing that looks ready.
+
+The compiler cannot yet tell two packages of one name apart, nor resolve an
+import through a key that differs from the package's name
+([compiler `separate-compilation.md` §6](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md#6-open-questions)).
+Until it can, `zane` refuses a graph holding two versions of one package or
+two packages of one name, and a dependency whose key is not its package's
+name.
 
 ---
 
@@ -188,8 +242,25 @@ which only `zane` reads, so the contract is:
   is a compile-time error
   ([`packages.md` §6.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#62-main-is-the-entry-point)).
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
+  `T` is spelled as `zig cc` reads it; the compiler hands LLVM its normal
+  form and the C compiler the triple as written.
+- **`--stamp NAME=STAMP`** gives a dependency's stamp, the pinned tag, `%`,
+  the identity hash of its URL and `%`
+  ([`dependencies.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#61-placeholder-prefix-rewriting)).
+  A stamped package arrives as prebuilt objects, so the compiler emits
+  nothing it declares, and names what it defines with the stamp.
+- **`--link FILE`** adds a stamped dependency's rewritten object to
+  `--build`'s link.
+- **`--object OUT`** writes the root library's own object, every symbol it
+  defines under the `!` placeholder. `zane release` packs these (§4).
+- **`--rewrite STAMP INPUT OUTPUT`** writes the object `INPUT` with every `!`
+  in its symbols replaced by `STAMP`, for ELF, Mach-O and COFF objects. It is
+  the compiler's step because the symbol spelling is the compiler's, so the
+  pinned compiler rewrites what that same version built.
 
-`zanec` has these since zane-lang/compiler#147, and `--optimize` since #148.
+`zanec` has the first three since zane-lang/compiler#147, `--optimize`
+since #148, `--object` since #150, `--stamp` and `--link` since #151, and
+`--rewrite` since #152 for ELF and #153 for Mach-O and COFF.
 
 A `.zn` file in a subdirectory of `src/` is an error. `zane` reports it before
 calling the compiler, since it is the one listing the files.
@@ -205,7 +276,7 @@ it describes.
    `zanec` flags of §5. No dependencies, so a project uses the storage
    primitives (`@primitives$`) directly, as the compiler's test fixtures do.
 2. **Dependencies.** `add`, `remove`, `update`, `dev`, `remap`, `fetch`,
-   `tree`, and the cache.
+   `tree`, and the cache. `add`, `fetch` and the cache are built (§3.1).
 3. **Releases.** `release` and `release upload`, and cross-compilation.
 4. **Toolchains.** `toolchain install` and `use`, once the compiler publishes
    releases, starting with `v0.0`.

@@ -1,12 +1,12 @@
-require "./coda"
 require "./errors"
+require "./manifest"
 require "./project"
 
 module Zane
   # A project on disk: the directory holding its `zane.coda`, and what the
   # manifest says a build needs.
-  record Workspace, root : Path, name : String, kind : Project::Kind, zane_version : String do
-    MANIFEST = "zane.coda"
+  record Workspace, manifest : Manifest do
+    MANIFEST = Manifest::FILE
 
     # The project *dir* is in: the nearest directory, *dir* itself or one
     # above it, that holds a manifest.
@@ -23,31 +23,34 @@ module Zane
     end
 
     def self.load(root : Path) : Workspace
-      path = root / MANIFEST
-      Coda::Doc.parse_file(path) do |doc|
-        manifest = doc.root
-        name = field(manifest, "name", path)
-        unless Project.valid_name?(name)
-          raise UserError.new("#{path}: `#{name}` is not a package name")
-        end
-        kind = case value = field(manifest, "kind", path)
-               when "application" then Project::Kind::Application
-               when "library"     then Project::Kind::Library
-               else
-                 raise UserError.new("#{path}: `kind` is `#{value}`; it is `application` or `library`")
-               end
-        if (deps = manifest["deps"]?) && !(deps.is_a?(Coda::KeyedTable) && deps.empty?)
-          raise UserError.new("#{path}: dependencies are not supported yet, so `deps` stays empty")
-        end
-        new(root, name, kind, field(manifest, "zane-version", path))
+      manifest = Manifest.load(root)
+      unless manifest.zane_version
+        raise UserError.new("#{root / MANIFEST} has no `zane-version` field")
       end
-    rescue error : Coda::Error
-      raise UserError.new("#{path}: #{error.message}")
+      new(manifest)
     end
 
-    private def self.field(manifest : Coda::Block, key : String, path : Path) : String
-      node = manifest[key]? || raise UserError.new("#{path} has no `#{key}` field")
-      node.as?(Coda::StringNode).try(&.value) || raise UserError.new("#{path}: `#{key}` is not a single value")
+    def root : Path
+      manifest.root
+    end
+
+    def name : String
+      manifest.name
+    end
+
+    def kind : Project::Kind
+      manifest.kind
+    end
+
+    # The compiler release that builds the project.
+    def zane_version : String
+      manifest.zane_version.not_nil!
+    end
+
+    # The compiler pin: its tag, and the commit the lock file's `zane` row
+    # names (spec dependencies.md §14).
+    def toolchain : {String, String}
+      {zane_version, manifest.resolutions[Manifest::COMPILER_KEY].commit}
     end
 
     # Where the package's sources are (spec packages.md §2.1).

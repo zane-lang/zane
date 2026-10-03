@@ -1,9 +1,16 @@
-# Stands in for `zanec` in the specs. As a compiler (any run given
+# Stands in for `zanec` in the specs. `--rewrite STAMP INPUT OUTPUT` writes
+# the stamp's line followed by the input. As a compiler (any run given
 # `--package`) it appends its arguments to the file `FAKE_ZANEC_LOG` names,
 # exits with `FAKE_ZANEC_STATUS`, and for `--build OUT` copies itself to OUT.
 # Run as that program, it prints its arguments and exits with
 # `FAKE_PROGRAM_STATUS`.
-if ARGV.includes?("--package")
+if ARGV.first? == "--rewrite"
+  if log = ENV["FAKE_ZANEC_LOG"]?
+    File.open(log, "a") { |f| f.puts ARGV.join(" ") }
+  end
+  _, stamp, input, output = ARGV
+  File.write(output, "rewritten #{stamp}\n#{File.read(input)}")
+elsif ARGV.includes?("--package")
   if log = ENV["FAKE_ZANEC_LOG"]?
     File.open(log, "a") { |f| f.puts ARGV.join(" ") }
   end

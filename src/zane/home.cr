@@ -14,5 +14,10 @@ module Zane
     def self.toolchains : Path
       dir / "toolchains"
     end
+
+    # The package cache, shared by every project (spec dependencies.md §7).
+    def self.packages : Path
+      dir / "packages"
+    end
   end
 end

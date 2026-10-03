@@ -2,7 +2,9 @@ require "file_utils"
 require "option_parser"
 require "../compiler"
 require "../errors"
+require "../graph"
 require "../home"
+require "../target"
 require "../workspace"
 
 module Zane::Commands
@@ -10,6 +12,7 @@ module Zane::Commands
   # compiler, and handing the compiler the project (docs/design/cli.md §5).
   abstract class ProjectCommand
     @workspace : Workspace? = nil
+    @graph : Graph? = nil
 
     # *dir* is where the command runs from, and *toolchains* where compilers
     # are installed; tests change both.
@@ -44,15 +47,20 @@ module Zane::Commands
       @workspace ||= Workspace.find(@dir).tap(&.check_sources)
     end
 
+    # The packages the project depends on, their sources fetched.
+    private def graph : Graph
+      @graph ||= Graph.new(workspace)
+    end
+
     private def compiler : Compiler
       Compiler.locate(workspace.zane_version, @toolchains)
     end
 
-    # The compiler's flags for the project: its kind, and its one package
-    # named by the manifest.
+    # The compiler's flags for the project: its kind, its own package named
+    # by the manifest, and the packages it depends on.
     private def project_flags : Array(String)
       ws = workspace
-      ["--kind", ws.kind.to_s, "--package", "#{ws.name}=#{ws.source_dir}"]
+      ["--kind", ws.kind.to_s, "--package", "#{ws.name}=#{ws.source_dir}"] + graph.package_flags
     end
 
     # Builds the application for *target*, the host when nil, into *path*,
@@ -66,13 +74,14 @@ module Zane::Commands
       args = ["--build", path.to_s]
       args.push("--target", target) if target
       args << "--optimize" if optimize
-      compiler.run(args + project_flags, @output, @error)
+      links = graph.objects(target || Target::HOST, compiler).flat_map { |o| ["--link", o.to_s] }
+      compiler.run(args + project_flags + links, @output, @error)
     end
 
     # The program's file in `out/<dir>/`, named for the package, with `.exe`
     # when *target* (the host when nil) is Windows.
     private def output_in(dir : String, target : String?) : Path
-      windows = target ? target.includes?("windows") : {{ flag?(:win32) }}
+      windows = Target.windows?(target || Target::HOST)
       workspace.out_dir / dir / (windows ? "#{workspace.name}.exe" : workspace.name)
     end
 
