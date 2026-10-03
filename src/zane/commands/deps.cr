@@ -6,6 +6,7 @@ require "../git"
 require "../graph"
 require "../home"
 require "../manifest"
+require "../cache"
 require "../package_url"
 require "../project_files"
 require "../target"
@@ -54,7 +55,7 @@ module Zane::Commands
     private def fetch(manifest : Manifest) : Graph
       graph = Graph.new(Workspace.new(manifest))
       graph.objects(Target::HOST, Compiler.locate(workspace.zane_version, @toolchains))
-      Commands.warn_stale_remaps(graph, @error)
+      Commands.report(graph, @error)
       graph
     end
 
@@ -143,12 +144,6 @@ module Zane::Commands
       end
       if ws.manifest.dependency?(key)
         raise UserError.new("the project already depends on `#{key}`; change its version with `zane update`")
-      end
-      ws.manifest.deps.each do |d|
-        other = PackageUrl.parse(ws.manifest.resolutions[d.key].url)
-        if other.normalized == url.normalized
-          raise UserError.new("the project already depends on #{url}, as `#{d.key}`")
-        end
       end
       key
     end
@@ -286,15 +281,29 @@ module Zane::Commands
         return 0
       end
 
+      same_package(dep, Path[from].expand(ws.root)) unless off
       updated = dep.copy_with(from: from)
       fetch(ws.manifest.with_dependency(updated, ws.manifest.resolutions[dep.key]))
       ProjectFiles.change(ws.root, ->(doc : Coda::Doc) { ProjectFiles.deps(doc)[dep.key]["from"] = from; nil })
       if off
         @output.puts "#{dep.key} now links its release, #{dep.version}."
       else
-        @output.puts "#{dep.key} now compiles from #{from}, with the project; `zane dev off #{dep.key}` returns to #{dep.version}."
+        @output.puts "#{dep.key} now compiles from #{from}; `zane dev off #{dep.key}` returns to #{dep.version}."
       end
       0
+    end
+
+    # A local project stands in for the release it replaces, and is named
+    # with that release's stamp (spec dependencies.md §12.2), so it has to
+    # be the same package: its manifest names the package the pinned commit's
+    # does.
+    private def same_package(dep : Dependency, dir : Path) : Nil
+      local = Manifest.load(dir).name
+      resolution = workspace.manifest.resolutions[dep.key]
+      pinned = Manifest.load(CacheEntry.new(PackageUrl.parse(resolution.url), dep.version).source(resolution.commit)).name
+      return if local == pinned
+      raise UserError.new("#{dir} is the package `#{local}`, but #{dep.key} #{dep.version} is the package `#{pinned}`; " \
+                          "a local project stands in for the same package")
     end
 
     # *path*, given from where the command runs, as the manifest writes it:
@@ -375,14 +384,16 @@ module Zane::Commands
       targets = @targets.empty? ? [Target::HOST] : @targets
       targets.each do |target|
         graph.objects(target, compiler)
-        @output.puts "Fetched #{graph.packages.size} #{graph.packages.size == 1 ? "package" : "packages"} for #{target}."
+        count = graph.linked.size
+        @output.puts "Fetched #{count} #{count == 1 ? "package" : "packages"} for #{target}."
       end
       0
     end
   end
 
   # `zane tree` (§3): the resolved graph, each package under what depends on
-  # it, with its version and where its code comes from.
+  # it, with its version and where its code comes from, then the versions
+  # linked side by side and those remapping collapsed.
   class Tree < ProjectCommand
     def usage : String
       "usage: zane tree"
@@ -391,29 +402,45 @@ module Zane::Commands
     def run : Int32
       ws = workspace
       @output.puts "#{ws.name} (#{ws.kind})"
-      shown = Set(String).new
-      print(graph.direct, "", shown)
+      print(graph.direct, "", Set(String).new)
+      graph.linked.group_by(&.url.normalized).each_value do |versions|
+        next if versions.size < 2
+        @output.puts "Side by side: #{versions[0].url} #{versions.map(&.tag).join(", ")}"
+      end
+      graph.packages.each do |p|
+        if chosen = graph.chosen(p)
+          @output.puts "Remapped: #{p.url} #{p.tag} onto #{chosen.tag}"
+        end
+      end
       0
     end
 
-    private def print(packages : Array(Graph::Package), indent : String, shown : Set(String)) : Nil
-      packages.each_with_index do |package, i|
-        last = i == packages.size - 1
-        again = shown.includes?(package.url.normalized)
-        @output.puts "#{indent}#{last ? "└── " : "├── "}#{line(package)}#{again ? " (see above)" : ""}"
+    private def print(edges : Array(Graph::Edge), indent : String, shown : Set(String)) : Nil
+      edges.each_with_index do |edge, i|
+        last = i == edges.size - 1
+        package = edge.package
+        chosen = graph.chosen(package)
+        resolved = chosen || package
+        again = shown.includes?(resolved.node)
+        notes = [] of String
+        notes << "remapped onto #{resolved.tag}" if chosen
+        notes << "see above" if again
+        note = notes.empty? ? "" : " (#{notes.join(", ")})"
+        @output.puts "#{indent}#{last ? "└── " : "├── "}#{line(edge.key, package)}#{note}"
         next if again
-        shown << package.url.normalized
-        print(graph.dependencies(package), indent + (last ? "    " : "│   "), shown)
+        shown << resolved.node
+        print(graph.dependencies(resolved), indent + (last ? "    " : "│   "), shown)
       end
     end
 
-    private def line(package : Graph::Package) : String
+    private def line(key : String, package : Graph::Package) : String
       from = case package.from
              in .release? then "prebuilt"
              in .source?  then "from source"
              in .path?    then "from #{package.manifest.root}"
              end
-      "#{package.key} #{package.tag}, #{package.url}, #{from}"
+      name = key == package.name ? key : "#{key} (#{package.name})"
+      "#{name} #{package.tag}, #{package.url}, #{from}"
     end
   end
 end
