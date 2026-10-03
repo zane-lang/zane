@@ -38,15 +38,39 @@ module Zane
     # The packages, each after every package it depends on.
     getter packages = [] of Package
 
+    # The URLs in the project's `remaps` that name no package of the graph,
+    # which are likely stale (§2.1).
+    getter stale_remaps = [] of String
+
     @by_url = {} of String => Package
     @by_hash = {} of String => Package
+    # What each package depends on directly, by its normalized URL; the
+    # project's own are under "".
+    @edges = {} of String => Array(Package)
 
     # Reads the graph of *workspace*. *packages* is the cache.
     def initialize(@workspace : Workspace, @packages_dir : Path = Home.packages)
-      visit(@workspace.manifest, [] of String, top: true)
+      visit(@workspace.manifest, "", [] of String, top: true)
+      @stale_remaps = @workspace.manifest.remaps.reject { |url| @by_url.has_key?(PackageUrl.parse(url).normalized) }
     end
 
-    private def visit(manifest : Manifest, chain : Array(String), top : Bool) : Nil
+    # The packages the project depends on directly, in its manifest's order.
+    def direct : Array(Package)
+      @edges[""]? || [] of Package
+    end
+
+    # The package of the graph at *url*, if there is one.
+    def package?(url : PackageUrl) : Package?
+      @by_url[url.normalized]?
+    end
+
+    # The packages *package* depends on directly, in its manifest's order.
+    def dependencies(package : Package) : Array(Package)
+      @edges[package.url.normalized]? || [] of Package
+    end
+
+    private def visit(manifest : Manifest, parent : String, chain : Array(String), top : Bool) : Nil
+      edges = @edges[parent] = [] of Package
       manifest.deps.each do |dep|
         resolution = manifest.resolutions[dep.key]
         url = PackageUrl.parse(resolution.url)
@@ -63,13 +87,15 @@ module Zane
         end
         if seen = @by_url[url.normalized]?
           same(seen, dep, resolution, from, manifest)
+          edges << seen.copy_with(key: dep.key)
           next
         end
         package = load(dep, resolution, url, from, manifest)
         check(package)
         @by_url[url.normalized] = package
         @by_hash[url.identity_hash] = package
-        visit(package.manifest, chain + [url.normalized], top: false)
+        edges << package
+        visit(package.manifest, url.normalized, chain + [url.normalized], top: false)
         @packages << package
       end
     end
@@ -126,8 +152,15 @@ module Zane
                             "a program cannot hold two versions of one package yet")
       end
       if seen.from != from
-        raise UserError.new("#{seen.url} is both compiled from #{seen.from.to_s.downcase} and linked prebuilt; " \
-                            "a program holds one copy of each package")
+        raise UserError.new("#{seen.url} is both #{how(seen.from)} and #{how(from)}; a program holds one copy of each package")
+      end
+    end
+
+    private def how(from : From) : String
+      case from
+      in .release? then "linked prebuilt"
+      in .source?  then "compiled from source"
+      in .path?    then "compiled from a local project"
       end
     end
 

@@ -156,11 +156,13 @@ module Zane
       raise UserError.new("#{@root}: the two files disagree: #{problems.join("; ")}")
     end
 
-    # The manifest with one more dependency, *dep*, locked to *resolution*.
+    # The manifest with *dep* locked to *resolution*: in place of the
+    # dependency with its key, or after the others when there is none.
     def with_dependency(dep : Dependency, resolution : Resolution) : Manifest
       resolutions = @resolutions.dup
       resolutions[dep.key] = resolution
-      Manifest.new(@root, @name, @kind, @zane_version, @version_pattern, @deps + [dep], @remaps, resolutions)
+      deps = dependency?(dep.key) ? @deps.map { |d| d.key == dep.key ? dep : d } : @deps + [dep]
+      Manifest.new(@root, @name, @kind, @zane_version, @version_pattern, deps, @remaps, resolutions)
     end
 
     def dependency?(key : String) : Dependency?
