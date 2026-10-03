@@ -18,6 +18,10 @@ module Zane
   #     build/                  its objects, as published
   #   build/<target>/           those objects, rewritten
   #   build/<target>.coda       what they were rewritten from, and with
+  #   build-from-source/<target>/package.o
+  #                             the object compiled from src/ (§12.1)
+  #   build-from-source/<target>.coda
+  #                             what it was compiled from, and with
   # ```
   #
   # Each part is made beside where it goes and renamed into place once it is
@@ -104,6 +108,33 @@ module Zane
       rewrite(originals, built, compiler)
       write_record(record, wanted)
       files(built)
+    end
+
+    # The object compiled from the checkout of *commit* for *target*, for a
+    # dependency compiled from source (§12.1). It is kept apart from the
+    # release's objects, and reused only while it was compiled from the same
+    # commit by the same compiler pin, *toolchain*. The block compiles it to
+    # the path it is given.
+    def compiled(commit : String, target : String, toolchain : {String, String}, & : Path ->) : Path
+      dir = @dir / "build-from-source"
+      built = dir / target
+      object = built / "package.o"
+      record = dir / "#{target}.coda"
+      wanted = {"commit" => commit, "target" => target,
+                "zane-version" => toolchain[0], "zane-commit" => toolchain[1]}
+      return object if File.file?(object) && read_record(record) == wanted
+
+      source(commit)
+      Dir.mkdir_p(dir)
+      partial = dir / ".#{target}.#{Random::Secure.hex(4)}"
+      Dir.mkdir(partial)
+      yield partial / object.basename
+      FileUtils.rm_rf(built)
+      File.rename(partial, built)
+      write_record(record, wanted)
+      object
+    ensure
+      FileUtils.rm_rf(partial) if partial && Dir.exists?(partial)
     end
 
     # The verified archive's objects, as published. An archive kept from

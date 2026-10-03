@@ -53,10 +53,15 @@ private class Registry
     Zane::PackageUrl.parse(url(name)).stamp(tag)
   end
 
+  # What the compiler knows the version by: its stamp and name.
+  def id(name : String, tag : String) : String
+    "#{stamp(name, tag)}#{name}"
+  end
+
   # Publishes *name* at *tag*, depending on *deps* (each a name and tag
   # published before), and returns the tag's commit.
   def publish(name : String, tag : String, deps = [] of {String, String}, kind = "library",
-              archive : Bytes? = nil, artifacts = true, package_name = name) : String
+              archive : Bytes? = nil, artifacts = true, package_name = name, pattern = "v*.+.++") : String
     repo = @dir / name
     unless Dir.exists?(repo)
       Dir.mkdir_p(repo)
@@ -68,7 +73,7 @@ private class Registry
       name #{package_name}
       kind #{kind}
       zane-version v0.1
-      version-pattern v*.+.++
+      version-pattern #{pattern}
 
       deps [
           key version from
@@ -257,9 +262,10 @@ describe Zane::Commands::Add do
       zane(["add", registry.url("math"), "v1.0"], project)[0].should eq 0
       zane(["build"], project)[0].should eq 0
       math = entry("math", "v1.0")
+      id = registry.id("math", "v1.0")
       File.read_lines(log).last.should end_with(
-        "--package app=#{project / "src"} --package math=#{math / "src" / "src"} " \
-        "--stamp math=#{registry.stamp("math", "v1.0")} --link #{math / "build" / Zane::Target::HOST / "math.o"}")
+        "--package app=#{project / "src"} --package #{id}=#{math / "src" / "src"} " \
+        "--import app:math=#{id} --link #{math / "build" / Zane::Target::HOST / "math.o"}")
       registry.fetched.size.should eq 1
       File.read_lines(log).count(&.starts_with?("--rewrite")).should eq 1
     end
@@ -272,10 +278,11 @@ describe Zane::Commands::Add do
       zane(["add", registry.url("shapes")], project)[0].should eq 0
       registry.fetched.size.should eq 2
       zane(["check"], project)[0].should eq 0
+      shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
       File.read_lines(log).last.should eq(
         "--check --kind application --package app=#{project / "src"} " \
-        "--package shapes=#{entry("shapes", "v2.0") / "src" / "src"} --package math=#{entry("math", "v1.0") / "src" / "src"} " \
-        "--stamp shapes=#{registry.stamp("shapes", "v2.0")} --stamp math=#{registry.stamp("math", "v1.0")}")
+        "--package #{shapes}=#{entry("shapes", "v2.0") / "src" / "src"} --package #{math}=#{entry("math", "v1.0") / "src" / "src"} " \
+        "--import app:shapes=#{shapes} --import #{shapes}:math=#{math}")
     end
   end
 
@@ -285,7 +292,14 @@ describe Zane::Commands::Add do
       zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
       read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"math" => {"version" => "v1.0", "from" => "source"}})
       zane(["build"], project)[0].should eq 0
-      File.read_lines(log).last.should end_with "--package math=#{entry("math", "v1.0") / "src" / "src"}"
+      zane(["build"], project)[0].should eq 0
+      id = registry.id("math", "v1.0")
+      compiled = File.read_lines(log).select(&.starts_with?("--kind library --object"))
+      compiled.size.should eq 1
+      compiled[0].should end_with "--package #{id}=#{entry("math", "v1.0") / "src" / "src"}"
+      object = entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST / "package.o"
+      File.read(object).should contain "--package #{id}="
+      File.read_lines(log).last.should end_with "--import app:math=#{id} --link #{object}"
       registry.fetched.should be_empty
     end
   end
@@ -298,9 +312,15 @@ describe Zane::Commands::Add do
       File.write(project / "zane.coda", File.read(project / "zane.coda").sub("]", "    shapes v2.0 #{local.relative_to(project).to_posix}\n]"))
       File.write(project / "zane-lock.coda", File.read(project / "zane-lock.coda").sub(/\]\n\z/, "    shapes #{registry.url("shapes")} #{commit}\n]\n"))
       zane(["build"], project)[0].should eq 0
+      shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
+      object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("shapes")).identity_hash / "v2.0" / "shapes.o"
+      File.read_lines(log)[-2].should eq(
+        "--kind library --object #{object} --package #{shapes}=#{local / "src"} " \
+        "--package #{math}=#{entry("math", "v1.0") / "src" / "src"} --import #{shapes}:math=#{math}")
       File.read_lines(log).last.should end_with(
-        "--package shapes=#{local / "src"} --package math=#{entry("math", "v1.0") / "src" / "src"} " \
-        "--stamp math=#{registry.stamp("math", "v1.0")} --link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"}")
+        "--package #{shapes}=#{local / "src"} --package #{math}=#{entry("math", "v1.0") / "src" / "src"} " \
+        "--import app:shapes=#{shapes} --import #{shapes}:math=#{math} " \
+        "--link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"} --link #{object}")
       Dir.exists?(entry("shapes", "v2.0")).should be_false
     end
   end
@@ -324,13 +344,15 @@ describe Zane::Commands::Add do
     end
   end
 
-  it "refuses a key that is not the library's package name" do
-    with_registry do |registry, project|
+  it "imports a library by a key that is not its package name" do
+    with_registry do |registry, project, log|
       registry.publish("math-lib", "v1.0", package_name: "math")
       expect_raises(Zane::UserError, "cannot be the key; choose one with --as") { zane(["add", registry.url("math-lib")], project) }
-      expect_raises(Zane::UserError, "is the package `math`") { zane(["add", registry.url("math-lib"), "--as", "maths"], project) }
-      zane(["add", registry.url("math-lib"), "--as", "math"], project)[0].should eq 0
-      expect_raises(Zane::UserError, "already depends on `math`") { zane(["add", registry.url("math-lib"), "--as", "math"], project) }
+      zane(["add", registry.url("math-lib"), "--as", "maths"], project)[0].should eq 0
+      expect_raises(Zane::UserError, "already depends on `maths`") { zane(["add", registry.url("math-lib"), "--as", "maths"], project) }
+      zane(["check"], project)[0].should eq 0
+      id = "#{registry.stamp("math-lib", "v1.0")}math"
+      File.read_lines(log).last.should end_with "--package #{id}=#{entry("math-lib", "v1.0") / "src" / "src"} --import app:maths=#{id}"
     end
   end
 end
@@ -441,7 +463,9 @@ describe Zane::Commands::Dev do
       output.should contain "math now compiles from #{from}"
       deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => from}})
       zane(["build"], project)[0].should eq 0
-      File.read_lines(log).last.should end_with "--package math=#{local / "src"}"
+      object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("math")).identity_hash / "v1.0" / "math.o"
+      File.read_lines(log).last.should end_with "--package #{registry.id("math", "v1.0")}=#{local / "src"} " \
+                                                "--import app:math=#{registry.id("math", "v1.0")} --link #{object}"
 
       zane(["dev", "off", "math"], project)[1].should eq "math now links its release, v1.0.\n"
       deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => "release"}})
@@ -455,7 +479,9 @@ describe Zane::Commands::Dev do
       registry.publish("shapes", "v1.0")
       zane(["add", registry.url("math")], project)[0].should eq 0
       expect_raises(Zane::UserError, "is not a project") { zane(["dev", "math", registry.dir.to_s], project) }
-      expect_raises(Zane::UserError, "is the package `shapes`") { zane(["dev", "math", (registry.dir / "shapes").to_s], project) }
+      expect_raises(Zane::UserError, "is the package `shapes`, but math v1.0 is the package `math`") do
+        zane(["dev", "math", (registry.dir / "shapes").to_s], project)
+      end
       deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => "release"}})
     end
   end
@@ -489,15 +515,12 @@ describe Zane::Commands::Tree do
       registry.publish("math", "v1.0")
       registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}])
       zane(["add", registry.url("shapes")], project)[0].should eq 0
-      expect_raises(Zane::UserError, "is both linked prebuilt and compiled from source") do
-        zane(["add", registry.url("math"), "--from-source"], project)
-      end
-      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
       zane(["tree"], project)[1].should eq <<-TEXT
         app (application)
         ├── shapes v2.0, https://example.com/shapes, prebuilt
-        │   └── math v1.0, https://example.com/math, prebuilt
-        └── math v1.0, https://example.com/math, prebuilt (see above)
+        │   └── math v1.0, https://example.com/math, from source
+        └── math v1.0, https://example.com/math, from source (see above)
 
         TEXT
     end
@@ -525,6 +548,112 @@ describe Zane::Commands::Cache do
       Dir.exists?(Zane::Home.packages).should be_false
       zane(["cache", "list"], project)[1].should contain "is empty"
       expect_raises(Zane::UserError, "usage") { zane(["cache", "wipe"], project) }
+    end
+  end
+end
+
+describe Zane::Remap do
+  it "chooses the best version in each window, by the pattern's priorities" do
+    result = Zane::Remap.select([{"v1.2.9", "v*.+.++"}, {"v1.3.0", "v*.+.++"}, {"v1.3.1", "v*.+.++"}, {"v2.0.0", "v*.+.++"}])
+    result.chosen.should eq({"v1.2.9" => "v1.3.1", "v1.3.0" => "v1.3.1"})
+    result.divergent.should be_nil
+  end
+
+  it "prefers the smaller value of a `-` component" do
+    Zane::Remap.select([{"v1.4", "v*.-"}, {"v1.2", "v*.-"}, {"v1.10", "v*.-"}]).chosen.should eq({"v1.4" => "v1.2", "v1.10" => "v1.2"})
+  end
+
+  it "keeps a tag of another shape apart, and notes patterns that differ" do
+    result = Zane::Remap.select([{"v1.0.0", "v*.+.++"}, {"v1.0.0-rc.1", "v*.+.++"}, {"v1.1", "v*.+"}])
+    result.chosen.should be_empty
+    result.divergent.should eq({"v1.0.0" => "v*.+.++", "v1.0.0-rc.1" => "v*.+.++", "v1.1" => "v*.+"})
+  end
+
+  it "matches literal components as written" do
+    Zane::Remap.select([{"v1.rc.2", "v*.rc.+"}, {"v1.rc.3", "v*.rc.+"}, {"v1.beta.4", "v*.rc.+"}]).chosen.should eq({"v1.rc.2" => "v1.rc.3"})
+  end
+end
+
+describe Zane::Graph do
+  it "links two versions of one package side by side, each importing its own" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      registry.publish("math", "v2.0")
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["add", registry.url("math"), "v2.0"], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+      shapes, math1, math2 = registry.id("shapes", "v1.0"), registry.id("math", "v1.0"), registry.id("math", "v2.0")
+      line = File.read_lines(log).last
+      line.should contain "--package #{math1}=#{entry("math", "v1.0") / "src" / "src"}"
+      line.should contain "--package #{math2}=#{entry("math", "v2.0") / "src" / "src"}"
+      line.should contain "--import app:shapes=#{shapes} --import app:math=#{math2}"
+      line.should contain "--import #{shapes}:math=#{math1}"
+      line.should contain "--link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"}"
+      line.should contain "--link #{entry("math", "v2.0") / "build" / Zane::Target::HOST / "math.o"}"
+      zane(["tree"], project)[1].should end_with "Side by side: https://example.com/math v1.0, v2.0\n"
+    end
+  end
+
+  it "links two packages of one name side by side" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      registry.publish("other-math", "v1.0", package_name: "math")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["add", registry.url("other-math"), "--as", "otherMath"], project)[0].should eq 0
+      zane(["check"], project)[0].should eq 0
+      other = "#{registry.stamp("other-math", "v1.0")}math"
+      File.read_lines(log).last.should end_with "--import app:math=#{registry.id("math", "v1.0")} --import app:otherMath=#{other}"
+    end
+  end
+
+  it "links one version in place of those its pattern says it can replace, when the project remaps them" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0.0")
+      registry.publish("math", "v1.2.0")
+      registry.publish("math", "v2.0.0")
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0.0"}])
+      registry.publish("plot", "v1.0", deps: [{"math", "v2.0.0"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["add", registry.url("plot")], project)[0].should eq 0
+      zane(["add", registry.url("math"), "v1.2.0"], project)[0].should eq 0
+      zane(["remap", registry.url("math")], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+
+      shapes = registry.id("shapes", "v1.0")
+      old, new = registry.stamp("math", "v1.0.0"), registry.stamp("math", "v1.2.0")
+      lines = File.read_lines(log)
+      build = lines.last
+      build.should_not contain "--package #{old}math"
+      build.should contain "--package #{new}math="
+      build.should contain "--package #{registry.id("math", "v2.0.0")}="
+      build.should contain "--import #{shapes}:math=#{new}math"
+      remapped = project / "out" / "remapped" / Zane::Target::HOST
+      shapes_object = entry("shapes", "v1.0") / "build" / Zane::Target::HOST / "shapes.o"
+      lines.should contain "--remap #{old} #{new} #{shapes_object} #{remapped / "1-shapes.o"}"
+      build.should contain "--link #{remapped / "1-shapes.o"}"
+      build.should_not contain "--link #{entry("math", "v1.0.0")}"
+      File.read(remapped / "1-shapes.o").should start_with "remapped #{old} #{new}\n"
+
+      tree = zane(["tree"], project)[1]
+      tree.should contain "│   └── math v1.0.0, https://example.com/math, prebuilt (remapped onto v1.2.0)"
+      tree.should contain "Side by side: https://example.com/math v1.2.0, v2.0.0"
+      tree.should contain "Remapped: https://example.com/math v1.0.0 onto v1.2.0"
+    end
+  end
+
+  it "keeps versions whose patterns differ side by side, and says so" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0", pattern: "v*.+")
+      registry.publish("math", "v1.1", pattern: "v+.++")
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["add", registry.url("math"), "v1.1"], project)[0].should eq 0
+      zane(["remap", registry.url("math")], project)[0].should eq 0
+      status, _, error = zane(["build"], project)
+      status.should eq 0
+      error.should contain "zane: note: the versions of https://example.com/math declare different version-patterns"
+      File.read_lines(log).none?(&.starts_with?("--remap")).should be_true
     end
   end
 end

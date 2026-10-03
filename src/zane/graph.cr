@@ -1,25 +1,32 @@
+require "file_utils"
 require "./cache"
 require "./compiler"
 require "./errors"
 require "./home"
 require "./manifest"
 require "./package_url"
+require "./remap"
+require "./target"
 require "./workspace"
 
 module Zane
   # Every package a project depends on, directly or not, read from the
-  # manifests of the pinned commits (spec dependencies.md §9, §13).
+  # manifests of the pinned commits (spec dependencies.md §9, §13). Each
+  # version of a package is a package of its own, so versions are linked side
+  # by side (§11) unless the project remaps them onto one (§15).
   class Graph
     # Where a package's code comes from (§2.1). Only the project's own
-    # manifest chooses; every package reached through another is `Release`.
+    # manifest chooses; every package reached only through another is
+    # `Release`.
     enum From
       Release
       Source
       Path
     end
 
-    # One package of the graph. *entry* is its place in the cache, which a
-    # path dependency has none of.
+    # One version of one package. *key* is the key it was first reached by,
+    # and *entry* its place in the cache, which a path dependency has none
+    # of.
     record Package, key : String, name : String, url : PackageUrl, tag : String, commit : String,
       from : From, manifest : Manifest, entry : CacheEntry? do
       # The directory of its sources, which the compiler reads (§12).
@@ -27,76 +34,154 @@ module Zane
         manifest.root / "src"
       end
 
-      # The name its symbols carry in place of the placeholder. Only a
-      # prebuilt package is stamped: one compiled from source is compiled
-      # with the project.
-      def stamp : String?
-        from.release? ? url.stamp(tag) : nil
+      # The name its symbols carry in place of the placeholder (§6.1).
+      def stamp : String
+        url.stamp(tag)
+      end
+
+      # What the compiler knows it by: its stamp and name (compiler
+      # docs/design/separate-compilation.md C10).
+      def id : String
+        "#{stamp}#{name}"
+      end
+
+      # The version of the package it is: its URL and tag.
+      def node : String
+        Graph.node(url, tag)
       end
     end
 
-    # The packages, each after every package it depends on.
+    # A dependency as a package's manifest records it: the key it imports
+    # the package by, and the version it pins.
+    record Edge, key : String, package : Package
+
+    def self.node(url : PackageUrl, tag : String) : String
+      "#{url.normalized} #{tag}"
+    end
+
+    # Every version the manifests pin, each after every package it depends
+    # on.
     getter packages = [] of Package
 
     # The URLs in the project's `remaps` that name no package of the graph,
     # which are likely stale (§2.1).
     getter stale_remaps = [] of String
 
-    @by_url = {} of String => Package
-    @by_hash = {} of String => Package
-    # What each package depends on directly, by its normalized URL; the
-    # project's own are under "".
-    @edges = {} of String => Array(Package)
+    # Informational notes from resolving the graph, such as versions whose
+    # patterns differ and so are not all collapsed (§15.4).
+    getter notes = [] of String
+
+    @nodes = {} of String => Package
+    # Which URL each identity hash belongs to, so two never share one (§6.1).
+    @hashes = {} of String => String
+    # What each version depends on, as its manifest pins it; the project's
+    # own dependencies are under "".
+    @edges = {} of String => Array(Edge)
+    # The project's own dependencies, which choose where their code comes
+    # from (§2.1), by version.
+    @top = {} of String => Dependency
+    # Each version remapping displaced, and the version chosen in its place.
+    @chosen = {} of String => Package
 
     # Reads the graph of *workspace*. *packages* is the cache.
     def initialize(@workspace : Workspace, @packages_dir : Path = Home.packages)
-      visit(@workspace.manifest, "", [] of String, top: true)
-      @stale_remaps = @workspace.manifest.remaps.reject { |url| @by_url.has_key?(PackageUrl.parse(url).normalized) }
+      manifest = @workspace.manifest
+      manifest.deps.each do |dep|
+        @top[Graph.node(PackageUrl.parse(manifest.resolutions[dep.key].url), dep.version)] = dep
+      end
+      visit(manifest, "", [] of String)
+      @stale_remaps = manifest.remaps.reject do |url|
+        normalized = PackageUrl.parse(url).normalized
+        @packages.any? { |p| p.url.normalized == normalized }
+      end
+      remap
     end
 
-    # The packages the project depends on directly, in its manifest's order.
-    def direct : Array(Package)
-      @edges[""]? || [] of Package
+    # The dependencies the project's manifest pins, in its order.
+    def direct : Array(Edge)
+      @edges[""]? || [] of Edge
     end
 
-    # The package of the graph at *url*, if there is one.
-    def package?(url : PackageUrl) : Package?
-      @by_url[url.normalized]?
+    # The dependencies *package*'s manifest pins, in its order.
+    def dependencies(package : Package) : Array(Edge)
+      @edges[package.node]? || [] of Edge
     end
 
-    # The packages *package* depends on directly, in its manifest's order.
-    def dependencies(package : Package) : Array(Package)
-      @edges[package.url.normalized]? || [] of Package
+    # The version remapping links in place of *package*, if it displaced it.
+    def chosen(package : Package) : Package?
+      @chosen[package.node]?
     end
 
-    private def visit(manifest : Manifest, parent : String, chain : Array(String), top : Bool) : Nil
-      edges = @edges[parent] = [] of Package
+    # *package*, or the version chosen in its place.
+    def resolved(package : Package) : Package
+      chosen(package) || package
+    end
+
+    # Whether some version of the package at *url* is in the graph.
+    def package?(url : PackageUrl) : Bool
+      @packages.any? { |p| p.url.normalized == url.normalized }
+    end
+
+    # The versions a program links: those the project reaches once each
+    # displaced version is replaced by its chosen one, each after every
+    # package it depends on.
+    def linked : Array(Package)
+      @linked ||= begin
+        order = [] of Package
+        link(direct, order, Set(String).new)
+        order
+      end
+    end
+
+    private def link(edges : Array(Edge), order : Array(Package), seen : Set(String)) : Nil
+      edges.each do |edge|
+        package = resolved(edge.package)
+        next if seen.includes?(package.node)
+        seen << package.node
+        link(dependencies(package), order, seen)
+        order << package
+      end
+    end
+
+    @linked : Array(Package)?
+
+    private def visit(manifest : Manifest, parent : String, chain : Array(String)) : Nil
+      edges = @edges[parent] = [] of Edge
       manifest.deps.each do |dep|
         resolution = manifest.resolutions[dep.key]
         url = PackageUrl.parse(resolution.url)
-        from = if !top || dep.release?
-                 From::Release
-               elsif dep.source?
-                 From::Source
-               else
-                 From::Path
-               end
         if chain.includes?(url.normalized)
           cycle = (chain + [url.normalized]).skip_while { |u| u != url.normalized }
           raise UserError.new("the packages depend on each other in a cycle: #{cycle.join(" -> ")}")
         end
-        if seen = @by_url[url.normalized]?
-          same(seen, dep, resolution, from, manifest)
-          edges << seen.copy_with(key: dep.key)
+        node = Graph.node(url, dep.version)
+        if seen = @nodes[node]?
+          unless seen.commit.starts_with?(resolution.commit) || resolution.commit.starts_with?(seen.commit)
+            raise UserError.new("#{url} #{dep.version} is pinned to both #{seen.commit} and #{resolution.commit} " \
+                                "(by #{manifest.root}); one tag is one commit")
+          end
+          edges << Edge.new(dep.key, seen)
           next
         end
-        package = load(dep, resolution, url, from, manifest)
+        top = @top[node]?
+        package = load(top || dep, resolution, url, from(top), manifest)
         check(package)
-        @by_url[url.normalized] = package
-        @by_hash[url.identity_hash] = package
-        edges << package
-        visit(package.manifest, url.normalized, chain + [url.normalized], top: false)
+        @nodes[node] = package
+        edges << Edge.new(dep.key, package)
+        visit(package.manifest, node, chain + [url.normalized])
         @packages << package
+      end
+    end
+
+    # Where a version's code comes from: the project's choice for one of its
+    # own dependencies, and the release for any other (§2.1).
+    private def from(top : Dependency?) : From
+      if top.nil? || top.release?
+        From::Release
+      elsif top.source?
+        From::Source
+      else
+        From::Path
       end
     end
 
@@ -106,18 +191,15 @@ module Zane
         unless File.file?(dir / Manifest::FILE)
           raise UserError.new("`#{dep.key}` comes from #{dep.from}, which holds no #{Manifest::FILE}")
         end
-        return named(Package.new(dep.key, "", url, dep.version, resolution.commit, from, Manifest.load(dir), nil))
+        manifest = Manifest.load(dir)
+        return Package.new(dep.key, manifest.name, url, dep.version, resolution.commit, from, manifest, nil)
       end
       entry = CacheEntry.new(url, dep.version, @packages_dir)
-      src = entry.source(resolution.commit)
-      named(Package.new(dep.key, "", url, dep.version, resolution.commit, from, Manifest.load(src), entry))
+      manifest = Manifest.load(entry.source(resolution.commit))
+      Package.new(dep.key, manifest.name, url, dep.version, resolution.commit, from, manifest, entry)
     rescue error : UserError
       raise error if error.message.try(&.starts_with?("security error"))
       raise UserError.new("#{dep.key} (#{resolution.url} #{dep.version}, required by #{parent.root}): #{error.message}")
-    end
-
-    private def named(package : Package) : Package
-      package.copy_with(name: package.manifest.name)
     end
 
     # The rules a package must keep to be part of the graph.
@@ -125,65 +207,118 @@ module Zane
       if package.manifest.kind.application?
         raise UserError.new("`#{package.key}` (#{package.url}) is an application, and only a library can be a dependency")
       end
-      # The compiler resolves an import by the package's name, not by the key
-      # its importer gives it (compiler docs/design/separate-compilation.md §6).
-      if package.name != package.key
-        raise UserError.new("`#{package.key}` (#{package.url}) is the package `#{package.name}`; " \
-                            "until imports resolve through keys, a dependency's key is its package's name")
+      hash = package.url.identity_hash
+      if (other = @hashes[hash]?) && other != package.url.normalized
+        raise UserError.new("#{other} and #{package.url} have the same identity hash, so their symbols would collide")
       end
-      if package.name == @workspace.name
-        raise UserError.new("`#{package.key}` (#{package.url}) has the project's own name, `#{package.name}`")
-      end
-      if other = @by_hash[package.url.identity_hash]?
-        raise UserError.new("#{other.url} and #{package.url} have the same identity hash, so their symbols would collide")
-      end
-      if other = @by_url.values.find { |p| p.name == package.name }
-        raise UserError.new("#{other.url} and #{package.url} are both packages named `#{package.name}`; " \
-                            "a program cannot hold two packages of one name yet")
-      end
+      @hashes[hash] = package.url.normalized
     end
 
-    # A package reached a second time must be the version it was the first
-    # time, from the same place: a program holds one version of each package
-    # for now (compiler docs/design/separate-compilation.md §6).
-    private def same(seen : Package, dep : Dependency, resolution : Resolution, from : From, manifest : Manifest) : Nil
-      if seen.tag != dep.version || seen.commit != resolution.commit
-        raise UserError.new("#{seen.url} is needed at both #{seen.tag} and #{dep.version} (by #{manifest.root}); " \
-                            "a program cannot hold two versions of one package yet")
-      end
-      if seen.from != from
-        raise UserError.new("#{seen.url} is both #{how(seen.from)} and #{how(from)}; a program holds one copy of each package")
-      end
-    end
-
-    private def how(from : From) : String
-      case from
-      in .release? then "linked prebuilt"
-      in .source?  then "compiled from source"
-      in .path?    then "compiled from a local project"
-      end
-    end
-
-    # The compiler's flags for the packages: `--package` for each and
-    # `--stamp` for each prebuilt one, after the project's own `--package`.
-    def package_flags : Array(String)
-      flags = [] of String
-      @packages.reverse_each { |p| flags.push("--package", "#{p.name}=#{p.sources}") }
-      @packages.reverse_each do |p|
-        if stamp = p.stamp
-          flags.push("--stamp", "#{p.name}=#{stamp}")
+    # Collapses the versions of each package the project lists in `remaps`
+    # that their patterns say are interchangeable (§15.3).
+    private def remap : Nil
+      listed = @workspace.manifest.remaps.map { |u| PackageUrl.parse(u).normalized }
+      @packages.group_by(&.url.normalized).each do |url, versions|
+        next unless listed.includes?(url) && versions.size > 1
+        result = Remap.select(versions.map { |p| {p.tag, p.manifest.version_pattern} })
+        result.chosen.each do |displaced, chosen|
+          @chosen[Graph.node(versions[0].url, displaced)] = versions.find! { |p| p.tag == chosen }
+        end
+        if divergent = result.divergent
+          patterns = divergent.map { |tag, pattern| "#{tag} declares #{pattern}" }.join(", ")
+          @notes << "the versions of #{versions[0].url} declare different version-patterns (#{patterns}), " \
+                    "so only those that share one are linked as one"
         end
       end
+    end
+
+    # The compiler's flags for the packages: `--package` for each version
+    # linked, and `--import` for the keys of the project and of each of
+    # them, after the project's own `--package`. A key that named a displaced
+    # version names its chosen one.
+    def package_flags : Array(String)
+      flags = [] of String
+      linked.reverse_each { |p| flags.push("--package", "#{p.id}=#{p.sources}") }
+      flags.concat(imports(@workspace.name, direct, remapped: true))
+      linked.reverse_each { |p| flags.concat(imports(p.id, dependencies(p), remapped: true)) }
       flags
     end
 
-    # The prebuilt objects for *target*, fetched, verified and rewritten as
-    # they need to be (§13 steps 6 to 8).
+    private def imports(from : String, edges : Array(Edge), remapped : Bool) : Array(String)
+      edges.flat_map do |e|
+        target = remapped ? resolved(e.package) : e.package
+        ["--import", "#{from}:#{e.key}=#{target.id}"]
+      end
+    end
+
+    # The objects for *target* that a program links: each release's
+    # objects, fetched, verified and rewritten (§13 steps 6 to 8), and each
+    # `source` and path dependency compiled on its own with its stamp (§12).
+    # When remapping displaced a version, each object's references to it
+    # are moved to its chosen one (§15.6).
     def objects(target : String, compiler : Compiler) : Array(Path)
-      @packages.flat_map do |p|
+      objects = linked.flat_map do |p|
         entry = p.entry
-        next [] of Path unless p.from.release? && entry
-        entry.objects(p.commit, target, compiler, @workspace.toolchain)
+        case p.from
+        in .release?
+          entry.not_nil!.objects(p.commit, target, compiler, @workspace.toolchain)
+        in .source?
+          [entry.not_nil!.compiled(p.commit, target, @workspace.toolchain) { |dest| compile(p, target, compiler, dest) }]
+        in .path?
+          dest = @workspace.out_dir / "deps" / target / p.url.identity_hash / p.tag / "#{p.name}.o"
+          Dir.mkdir_p(dest.parent)
+          compile(p, target, compiler, dest)
+          [dest]
+        end
+      end
+      @chosen.empty? ? objects : remapped(objects, target, compiler)
+    end
+
+    # Compiles *package* on its own into the object *dest*, named with its
+    # stamp, against the versions its own manifest pins (compiler
+    # docs/design/separate-compilation.md C6).
+    private def compile(package : Package, target : String, compiler : Compiler, dest : Path) : Nil
+      closure = [] of Package
+      gather(package, closure)
+      args = ["--kind", "library", "--object", dest.to_s]
+      args.push("--target", target) unless target == Target::HOST
+      ([package] + closure).each { |p| args.push("--package", "#{p.id}=#{p.sources}") }
+      ([package] + closure).each { |p| args.concat(imports(p.id, dependencies(p), remapped: false)) }
+      error = IO::Memory.new
+      unless compiler.run(args, error, error) == 0
+        raise UserError.new("the compiler could not build #{package.key} #{package.tag} (#{package.url}):\n#{error.to_s.strip}")
+      end
+    end
+
+    # Every version *package* depends on, directly or not, as the manifests
+    # pin them.
+    private def gather(package : Package, closure : Array(Package)) : Nil
+      dependencies(package).each do |e|
+        next if closure.includes?(e.package)
+        closure << e.package
+        gather(e.package, closure)
+      end
+    end
+
+    # *objects* with every reference to a displaced version moved to its
+    # chosen one, written to the project's `out/`, since which versions are
+    # displaced is the project's choice.
+    private def remapped(objects : Array(Path), target : String, compiler : Compiler) : Array(Path)
+      dir = @workspace.out_dir / "remapped" / target
+      FileUtils.rm_rf(dir)
+      Dir.mkdir_p(dir)
+      pairs = @chosen.map { |node, chosen| {@nodes[node].stamp, chosen.stamp} }
+      objects.map_with_index do |object, i|
+        dest = dir / "#{i}-#{object.basename}"
+        input = object
+        pairs.each do |from, to|
+          error = IO::Memory.new
+          unless compiler.run(["--remap", from, to, input.to_s, dest.to_s], error, error) == 0
+            raise UserError.new("the compiler could not remap #{object}:\n#{error.to_s.strip}")
+          end
+          input = dest
+        end
+        dest
       end
     end
   end

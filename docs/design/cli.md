@@ -146,7 +146,7 @@ they always change the two files together
 | `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. |
 | `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
 | `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. |
-| `zane tree` | Prints the resolved graph: each package under what depends on it, with its tag, URL and where its code comes from. A package reached again is printed once more, marked, without what it depends on. |
+| `zane tree` | Prints the resolved graph: each package under what depends on it, with its key, tag, URL and where its code comes from. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
 
 `add`, `update` and `dev` fetch the changed graph for the host before writing
 either file, as `add` does, so a change that leaves the project unable to build
@@ -183,23 +183,37 @@ Only `check` stops before the objects: it needs the sources alone.
   were made with. The objects are reused only while all five match;
   otherwise they are rewritten again, from the kept archive when its hash
   still matches.
-- **Linking.** The compiler is given every package with `--package`, each
-  `release` one's stamp with `--stamp`, and its rewritten objects with
-  `--link`. A `source` or path dependency gets no stamp, so the compiler
-  compiles it with the project
-  ([compiler `separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md)
-  C1).
+- **Compiling from source.** A `source` dependency is compiled on its own
+  from its checkout, into `build-from-source/<target>/package.o`, named with
+  its stamp, against the versions its own lock file pins
+  ([§12.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#121-source-compilation-is-explicit-opt-in)).
+  `build-from-source/<target>.coda` records the commit, target and compiler
+  pin it was compiled with, and the object is reused only while all four
+  match. A path dependency is compiled the same way on every build, into the
+  project's `out/deps/<target>/`, and never enters the cache
+  ([§12.2](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#122-local-path-dependencies)).
+- **Remapping.** For each URL in `remaps`, the versions in the graph are
+  grouped by the `version-pattern` each one's manifest declares, and within
+  a group by their `*` components; each group of more than one version is
+  collapsed onto its best version by the pattern's priorities
+  ([§15.3](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#153-selection-best-of-both)).
+  A tag of another shape is kept apart quietly, and versions whose patterns
+  differ are kept apart with a note (§15.4). A displaced version is neither
+  compiled against nor linked: every key that named it names the chosen one,
+  and `zanec --remap` (§5) moves each linked object's references to it,
+  into the project's `out/remapped/<target>/`, since which versions are
+  displaced is the project's choice.
+- **Linking.** The compiler is given each version linked with
+  `--package STAMPNAME=DIR`, each package's keys, the project's included,
+  with `--import`, and every object with `--link`
+  ([compiler `separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md) C10).
+  Each version is a package of its own, so versions of one package, and
+  packages of one name, are linked side by side
+  ([§11](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#11-multiple-version-coexistence)),
+  and a key need not be its package's name.
 
 Each part of a cache entry is made beside where it goes and renamed into place
 once whole, so an interrupted fetch leaves nothing that looks ready.
-
-The compiler cannot yet tell two packages of one name apart, nor resolve an
-import through a key that differs from the package's name
-([compiler `separate-compilation.md` §6](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md#6-open-questions)).
-Until it can, `zane` refuses a graph holding two versions of one package or
-two packages of one name, and a dependency whose key is not its package's
-name. So no graph yet has versions to collapse, and `remaps` changes no build
-([`dependencies.md` §15](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#15-compatibility-patterns-and-remapping)).
 
 ---
 
@@ -241,31 +255,40 @@ A package's name is its manifest's `name`
 ([`packages.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#21-the-manifest-names-the-package)),
 which only `zane` reads, so the contract is:
 
-- **`--package NAME=DIR`** names a package explicitly. The first one is the
-  root.
+- **`--package NAME=DIR`** names a package explicitly, and
+  **`--package STAMPNAME=DIR`** gives it its stamp as well: the pinned tag,
+  `%`, the identity hash of its URL and `%`
+  ([`dependencies.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#61-placeholder-prefix-rewriting)).
+  A package with a stamp is known by its stamped name, so each version of a
+  package is a package of its own. The first `--package` is the root.
+- **`--import PACKAGE:KEY=PACKAGE`** says which package each of a package's
+  import keys names, each package named as `--package` names it.
 - **`--kind application|library`** for the root. An application without `main`
   is a compile-time error
   ([`packages.md` §6.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#62-main-is-the-entry-point)).
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
   `T` is spelled as `zig cc` reads it; the compiler hands LLVM its normal
   form and the C compiler the triple as written.
-- **`--stamp NAME=STAMP`** gives a dependency's stamp, the pinned tag, `%`,
-  the identity hash of its URL and `%`
-  ([`dependencies.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#61-placeholder-prefix-rewriting)).
-  A stamped package arrives as prebuilt objects, so the compiler emits
-  nothing it declares, and names what it defines with the stamp.
-- **`--link FILE`** adds a stamped dependency's rewritten object to
-  `--build`'s link.
+- A stamped dependency arrives as objects of its own, so the compiler emits
+  nothing it declares. **`--link FILE`** adds one of them to `--build`'s
+  link.
 - **`--object OUT`** writes the root library's own object, every symbol it
-  defines under the `!` placeholder. `zane release` packs these (§4).
+  defines under the `!` placeholder, or under its stamp when it has one.
+  `zane release` packs the first (§4), and a dependency compiled from source
+  or a path is the second (§3.1).
 - **`--rewrite STAMP INPUT OUTPUT`** writes the object `INPUT` with every `!`
   in its symbols replaced by `STAMP`, for ELF, Mach-O and COFF objects. It is
   the compiler's step because the symbol spelling is the compiler's, so the
   pinned compiler rewrites what that same version built.
+- **`--remap FROM TO INPUT OUTPUT`** writes the object `INPUT` with every
+  reference to the version stamped `FROM` moved to the version of the same
+  package stamped `TO`, for remapping
+  ([`dependencies.md` §15.6](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#156-mechanism-reuses-pull-time-rewriting)).
 
-`zanec` has the first three since zane-lang/compiler#147, `--optimize`
-since #148, `--object` since #150, `--stamp` and `--link` since #151, and
-`--rewrite` since #152 for ELF and #153 for Mach-O and COFF.
+`zanec` has `--check`, `--build` and `--target` since
+zane-lang/compiler#147, `--optimize` since #148, `--object` since #150,
+`--link` since #151, `--rewrite` since #152 for ELF and #153 for Mach-O and
+COFF, and stamped `--package` names, `--import` and `--remap` since #156.
 
 A `.zn` file in a subdirectory of `src/` is an error. `zane` reports it before
 calling the compiler, since it is the one listing the files.
@@ -281,8 +304,7 @@ it describes.
    `zanec` flags of §5. No dependencies, so a project uses the storage
    primitives (`@primitives$`) directly, as the compiler's test fixtures do.
 2. **Dependencies.** `add`, `remove`, `update`, `dev`, `remap`, `fetch`,
-   `tree`, and the cache (§3, §3.1). Built; collapsing versions under
-   `remaps` waits on the compiler linking two versions of one package.
+   `tree`, and the cache (§3, §3.1). Built.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
 4. **Toolchains.** `toolchain install` and `use`, once the compiler publishes
    releases, starting with `v0.0`.
