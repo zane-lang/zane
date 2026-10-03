@@ -141,15 +141,19 @@ they always change the two files together
 | Command | Does |
 |---|---|
 | `zane add <url> [tag] [--as key] [--from-source]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Fetches the library and everything it depends on for the host before writing either file, so a missing artifact shows up immediately and a library that cannot be used is never recorded. Refuses a package whose `kind` is `application`. Prints the `import` line to use. |
-| `zane remove <key>` | Removes the key from both files, and warns about source files that still import it. |
-| `zane update [key [tag]] [--accept-tag-move]` | Re-resolves one key, or every key. A tag that moved is refused without the flag. |
-| `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local path, or back to `release`. |
-| `zane remap <url>` / `zane unremap <url>` | Edits the `remaps` list. |
+| `zane remove <key>` | Removes the key from both files, and warns about each line of `src/` that still imports it. |
+| `zane update [key [tag]] [--accept-tag-move]` | Moves one key, or every key, to the tag named, or else the newest, and pins its commit. A tag that now points to another commit than the lock file pins has moved, and is refused with a security error without the flag. |
+| `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. |
+| `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
 | `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. |
-| `zane tree [--target T]` | Prints the resolved graph: versions linked side by side, versions collapsed by remapping, and where each package's code comes from. |
+| `zane tree` | Prints the resolved graph: each package under what depends on it, with its tag, URL and where its code comes from. A package reached again is printed once more, marked, without what it depends on. |
 
-`add` and `fetch` are built, and `check`, `build` and `run` resolve and fetch
-the graph as §3.1 says. The others are still to come.
+`add`, `update` and `dev` fetch the changed graph for the host before writing
+either file, as `add` does, so a change that leaves the project unable to build
+is refused and nothing is written. `remove`, `remap` and `unremap` write without
+fetching. `check`, `build` and `run` resolve and fetch the graph as §3.1 says,
+and warn about each URL in `remaps` that names no package of the graph
+([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
 
 ### 3.1 Fetching
 
@@ -194,7 +198,8 @@ import through a key that differs from the package's name
 ([compiler `separate-compilation.md` §6](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md#6-open-questions)).
 Until it can, `zane` refuses a graph holding two versions of one package or
 two packages of one name, and a dependency whose key is not its package's
-name.
+name. So no graph yet has versions to collapse, and `remaps` changes no build
+([`dependencies.md` §15](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#15-compatibility-patterns-and-remapping)).
 
 ---
 
@@ -206,7 +211,7 @@ name.
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install` | Installs the compiler the project's `zane-version` names (§4.1), and verifies it against the `zane` lock row. |
 | `zane toolchain use <tag>` | Changes `zane-version` and the `zane` lock row together. |
-| `zane cache list` / `path` / `clean [--stale]` | Lists, locates or prunes `~/.zane/packages`. |
+| `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll` | The compiler's debug views, run on the project. |
 
 What an application's release produces is not designed yet.
@@ -276,7 +281,8 @@ it describes.
    `zanec` flags of §5. No dependencies, so a project uses the storage
    primitives (`@primitives$`) directly, as the compiler's test fixtures do.
 2. **Dependencies.** `add`, `remove`, `update`, `dev`, `remap`, `fetch`,
-   `tree`, and the cache. `add`, `fetch` and the cache are built (§3.1).
+   `tree`, and the cache (§3, §3.1). Built; collapsing versions under
+   `remaps` waits on the compiler linking two versions of one package.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
 4. **Toolchains.** `toolchain install` and `use`, once the compiler publishes
    releases, starting with `v0.0`.

@@ -8,6 +8,15 @@ require "../target"
 require "../workspace"
 
 module Zane::Commands
+  # A URL in `remaps` that names no package of the graph is likely a typo or
+  # left from a removed dependency, so it is pointed out, but changes nothing
+  # (spec dependencies.md §2.1).
+  def self.warn_stale_remaps(graph : Graph, error : IO) : Nil
+    graph.stale_remaps.each do |url|
+      error.puts "zane: warning: `remaps` lists #{url}, which is no package the project depends on; `zane unremap #{url}` removes it"
+    end
+  end
+
   # What `check`, `build` and `run` share: finding the project and its
   # compiler, and handing the compiler the project (docs/design/cli.md §5).
   abstract class ProjectCommand
@@ -49,7 +58,7 @@ module Zane::Commands
 
     # The packages the project depends on, their sources fetched.
     private def graph : Graph
-      @graph ||= Graph.new(workspace)
+      @graph ||= Graph.new(workspace).tap { |g| Commands.warn_stale_remaps(g, @error) }
     end
 
     private def compiler : Compiler

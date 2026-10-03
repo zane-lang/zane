@@ -139,11 +139,18 @@ private def zane(args : Array(String), dir : Path) : {Int32, String, String}
   command = args.first
   rest = args[1..]
   status = case command
-           when "add"   then Zane::Commands::Add.new(rest, output, error, dir).run
-           when "fetch" then Zane::Commands::Fetch.new(rest, output, error, dir).run
-           when "build" then Zane::Commands::Build.new(rest, output, error, dir).run
-           when "check" then Zane::Commands::Check.new(rest, output, error, dir).run
-           else              raise "no command #{command}"
+           when "add"     then Zane::Commands::Add.new(rest, output, error, dir).run
+           when "fetch"   then Zane::Commands::Fetch.new(rest, output, error, dir).run
+           when "build"   then Zane::Commands::Build.new(rest, output, error, dir).run
+           when "check"   then Zane::Commands::Check.new(rest, output, error, dir).run
+           when "remove"  then Zane::Commands::Remove.new(rest, output, error, dir).run
+           when "update"  then Zane::Commands::Update.new(rest, output, error, dir).run
+           when "dev"     then Zane::Commands::Dev.new(rest, output, error, dir).run
+           when "remap"   then Zane::Commands::Remap.new(true, rest, output, error, dir).run
+           when "unremap" then Zane::Commands::Remap.new(false, rest, output, error, dir).run
+           when "tree"    then Zane::Commands::Tree.new(rest, output, error, dir).run
+           when "cache"   then Zane::Commands::Cache.new(rest, output, error).run
+           else                raise "no command #{command}"
            end
   {status, output.to_s, error.to_s}
 end
@@ -352,6 +359,172 @@ describe Zane::Commands::Fetch do
       zane(["fetch"], project).should eq({0, "Fetched 1 package for #{Zane::Target::HOST}.\n", ""})
       registry.fetched.size.should eq 1
       File.read_lines(log).count(&.starts_with?("--rewrite")).should eq 2
+    end
+  end
+end
+
+private def deps_rows(project : Path)
+  read_coda(project / "zane.coda")["deps"].as(Hash)["rows"]
+end
+
+private def lock_rows(project : Path)
+  read_coda(project / "zane-lock.coda")["resolutions"].as(Hash)["rows"].as(Hash)
+end
+
+describe Zane::Commands::Remove do
+  it "drops the key from both files, and points out the files that still import it" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      File.write(project / "src" / "main.zn", "package app;\nimport math$sqrt;\nimport mathExtra;\n")
+      zane(["remove", "math"], project).should eq({0, "Removed math.\n", "zane: warning: src/main.zn:2 still imports math\n"})
+      deps_rows(project).should eq({} of String => Hash(String, String))
+      lock_rows(project).keys.should eq ["zane"]
+      expect_raises(Zane::UserError, "does not depend on `math`; it has no dependencies") { zane(["remove", "math"], project) }
+    end
+  end
+end
+
+describe Zane::Commands::Update do
+  it "moves a key to its newest tag, or the one named, and pins its commit" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      newest = registry.publish("math", "v1.1")
+      zane(["update"], project)[1].should eq "Updated math v1.0 -> v1.1 (commit #{newest[0, 12]}).\n"
+      deps_rows(project).should eq({"math" => {"version" => "v1.1", "from" => "release"}})
+      lock_rows(project)["math"]["commit"].should eq newest
+      File.exists?(entry("math", "v1.1") / "build" / Zane::Target::HOST / "math.o").should be_true
+      zane(["update", "math"], project)[1].should eq "math is already at its newest tag; nothing changed.\n"
+      zane(["update", "math", "v1.0"], project)[1].should start_with "Updated math v1.1 -> v1.0"
+    end
+  end
+
+  it "refuses a tag that moved unless told to trust it" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      repo = registry.dir / "math"
+      File.write(repo / "src" / "math.zn", "package math; // moved\n")
+      git(repo, "commit", "-q", "-am", "moved")
+      git(repo, "tag", "-f", "v1.0")
+      moved = git(repo, "rev-parse", "HEAD")
+      expect_raises(Zane::UserError, "--accept-tag-move") { zane(["update", "math", "v1.0"], project) }
+      lock_rows(project)["math"]["commit"].should_not eq moved
+      zane(["update", "math", "v1.0", "--accept-tag-move"], project)[0].should eq 0
+      lock_rows(project)["math"]["commit"].should eq moved
+      File.read(entry("math", "v1.0") / "src" / "src" / "math.zn").should contain "moved"
+    end
+  end
+
+  it "writes nothing when the new version cannot be fetched" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      registry.publish("math", "v2.0")
+      registry.downloads.delete(registry.downloads.keys.last)
+      expect_raises(Zane::UserError, "404") { zane(["update", "math"], project) }
+      deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => "release"}})
+    end
+  end
+end
+
+describe Zane::Commands::Dev do
+  it "compiles a dependency from a local project, then links its release again" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      local = registry.dir / "math"
+      from = local.relative_to(project).to_posix.to_s
+      status, output, _ = zane(["dev", "math", from], project)
+      status.should eq 0
+      output.should contain "math now compiles from #{from}"
+      deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => from}})
+      zane(["build"], project)[0].should eq 0
+      File.read_lines(log).last.should end_with "--package math=#{local / "src"}"
+
+      zane(["dev", "off", "math"], project)[1].should eq "math now links its release, v1.0.\n"
+      deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => "release"}})
+      zane(["dev", "off", "math"], project)[1].should contain "nothing changed"
+    end
+  end
+
+  it "refuses a directory that is not a project, or a project of another name" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      registry.publish("shapes", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      expect_raises(Zane::UserError, "is not a project") { zane(["dev", "math", registry.dir.to_s], project) }
+      expect_raises(Zane::UserError, "is the package `shapes`") { zane(["dev", "math", (registry.dir / "shapes").to_s], project) }
+      deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => "release"}})
+    end
+  end
+end
+
+describe Zane::Commands::Remap do
+  it "adds a URL to `remaps` and takes it out, warning about one the graph does not hold" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["remap", registry.url("math")], project).should eq({0, "Added #{registry.url("math")} to `remaps`.\n", ""})
+      File.read(project / "zane.coda").should contain "remaps [\n    #{registry.url("math")}\n]"
+      zane(["remap", registry.url("math")], project)[1].should contain "already"
+
+      status, _, error = zane(["remap", registry.url("other")], project)
+      status.should eq 0
+      error.should eq "zane: warning: no package the project depends on is #{registry.url("other")}\n"
+      zane(["check"], project)[2].should contain "`remaps` lists #{registry.url("other")}, which is no package"
+
+      zane(["unremap", registry.url("other")], project)[0].should eq 0
+      zane(["unremap", registry.url("math")], project)[0].should eq 0
+      File.read(project / "zane.coda").should_not contain "remaps"
+    end
+  end
+end
+
+describe Zane::Commands::Tree do
+  it "shows each package under what depends on it, and once" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      expect_raises(Zane::UserError, "is both linked prebuilt and compiled from source") do
+        zane(["add", registry.url("math"), "--from-source"], project)
+      end
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["tree"], project)[1].should eq <<-TEXT
+        app (application)
+        ├── shapes v2.0, https://example.com/shapes, prebuilt
+        │   └── math v1.0, https://example.com/math, prebuilt
+        └── math v1.0, https://example.com/math, prebuilt (see above)
+
+        TEXT
+    end
+  end
+end
+
+describe Zane::Commands::Cache do
+  it "lists the cache, and cleans what interrupted fetches left" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["cache", "path"], project)[1].should eq "#{Zane::Home.packages}\n"
+      zane(["cache", "list"], project)[1].should match /\Aexample.com\/math v1.0  #{Zane::Target::HOST}  \S+\n\z/
+
+      partial = entry("math", "v1.0") / ".src.0123abcd"
+      Dir.mkdir_p(partial)
+      unready = entry("math", "v1.0") / "build" / "other-target"
+      Dir.mkdir_p(unready)
+      zane(["cache", "clean", "--stale"], project)[0].should eq 0
+      Dir.exists?(partial).should be_false
+      Dir.exists?(unready).should be_false
+      Dir.exists?(entry("math", "v1.0") / "build" / Zane::Target::HOST).should be_true
+
+      zane(["cache", "clean"], project)[0].should eq 0
+      Dir.exists?(Zane::Home.packages).should be_false
+      zane(["cache", "list"], project)[1].should contain "is empty"
+      expect_raises(Zane::UserError, "usage") { zane(["cache", "wipe"], project) }
     end
   end
 end
