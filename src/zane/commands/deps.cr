@@ -188,7 +188,7 @@ module Zane::Commands
         path = ws.source_dir / name
         next unless name.ends_with?(".zn") && File.file?(path)
         File.read_lines(path).each_with_index(1) do |line, number|
-          found << {path.relative_to(ws.root).to_s, number} if import.matches?(line)
+          found << {path.relative_to(ws.root).to_posix.to_s, number} if import.matches?(line)
         end
       end
       found
