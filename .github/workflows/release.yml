@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag (for example v0.0 or v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialise releases, including different versions, without cancelling a build.
+concurrency:
+  group: cli-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate the version and source
+        id: validate
+        env:
+          VERSION: ${{ inputs.version }}
+          SOURCE_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$SOURCE_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "::error::Run releases from $DEFAULT_BRANCH."
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$ ]]; then
+            echo "::error::Use a tag such as v0.0 or v0.1.0."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION"; then
+            echo "::error::Tag $VERSION already exists; choose a new version."
+            exit 1
+          else
+            status=$?
+            # git returns 2 for no matching tag; other errors must stop the release.
+            if [[ "$status" != 2 ]]; then exit "$status"; fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zane-*
+          path: artifacts
+      - name: Prepare binaries and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir dist
+          cp artifacts/zane-linux-x86_64/zane dist/zane-linux-x86_64
+          cp artifacts/zane-macos-arm64/zane dist/zane-macos-arm64
+          cp artifacts/zane-windows-x86_64/zane.exe dist/zane-windows-x86_64.exe
+          cp install.sh install.ps1 dist/
+          cd dist
+          sha256sum zane-linux-x86_64 zane-macos-arm64 zane-windows-x86_64.exe install.sh install.ps1 > SHA256SUMS
+      # A failed upload leaves a draft, never an incomplete public release.
+      - name: Create the tag and upload a draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$VERSION" dist/* --target "$SOURCE_SHA" \
+            --title "$VERSION" --generate-notes --draft
+      - name: Publish the complete release
+        run: gh release edit "$VERSION" --draft=false --latest
