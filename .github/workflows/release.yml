@@ -92,7 +92,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$VERSION" dist/* --target "$SOURCE_SHA" \
+          # Creating the ref atomically also refuses a tag created during the builds.
+          gh api --method POST "repos/$GH_REPO/git/refs" --silent \
+            -f ref="refs/tags/$VERSION" -f sha="$SOURCE_SHA"
+          gh release create "$VERSION" dist/* --verify-tag \
             --title "$VERSION" --generate-notes --draft
       - name: Publish the complete release
         run: gh release edit "$VERSION" --draft=false --latest
