@@ -99,7 +99,7 @@ module Zane::Toolchain
     {% if flag?(:win32) %}
       File.file?(path)
     {% else %}
-      File.file?(path) && File.info(path).executable?
+      File.file?(path) && File::Info.executable?(path)
     {% end %}
   end
 
