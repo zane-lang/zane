@@ -223,7 +223,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 |---|---|
 | `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from`. For a library, has `zanec` write the `!`-prefixed objects for each target, packs one archive per target, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
-| `zane toolchain install` | Installs the compiler the project's `zane-version` names (§4.1), and verifies it against the `zane` lock row. |
+| `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
 | `zane toolchain use <tag>` | Changes `zane-version` and the `zane` lock row together. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll` | The compiler's debug views, run on the project. |
@@ -242,8 +242,13 @@ commit 0123456789abcdef0123456789abcdef01234567
 ```
 
 `url` is the repository the compiler was built from, and `commit` the commit
-its tag pointed to, which is what a project's `zane` lock row pins. Installing
-writes the record last, so a directory without one is an interrupted install
+its tag pointed to, which is what a project's `zane` lock row pins. Installation
+downloads the selected GitHub Release archive for the CLI's host and verifies
+it against that release's `SHA256SUMS`. It checks the archive's version and
+record against the repository tag, then atomically publishes the complete
+directory. An already installed matching release is reused; existing incomplete
+or conflicting directories are preserved and reported. Installing does not
+change any project's compiler pin. A directory without a record is an interrupted install
 and is ignored, as is a toolchain from another `url`. A toolchain is found from
 its record alone; the compiler is never asked what it is.
 
@@ -306,10 +311,10 @@ it describes.
 2. **Dependencies.** `add`, `remove`, `update`, `dev`, `remap`, `fetch`,
    `tree`, and the cache (§3, §3.1). Built.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
-4. **Toolchains.** `toolchain install` and `use`, once the compiler publishes
-   releases, starting with `v0.0`.
+4. **Toolchains.** `toolchain install [tag]` is implemented; `toolchain use`
+   remains to come.
 
 `zane` runs the first compiler it finds of: the one `ZANE_COMPILER` names, the
 toolchain installed for the project's `zane-version` (§4.1), and `zanec` on
-`PATH`. Until phase 4 installs toolchains, that is the first or the last, and
-which version it is goes unchecked.
+`PATH`. A compiler selected by `ZANE_COMPILER` or `PATH` is not checked against
+the project's pin.

@@ -49,17 +49,21 @@ module Zane
     # Unpacks the gzip-compressed tar archive at *path* into *dir*, which must
     # not exist, and returns how many files it held. Only directories and
     # regular files under `build/` are allowed, so nothing can land outside
-    # *dir* (§3.1). The tar format is read here, rather than by `tar`, so that
+    # *dir* (§3.1). Toolchains specify their own root, strip it and preserve
+    # executable bits. The tar format is read here, rather than by `tar`, so that
     # every entry is checked before anything is written. Nothing is left at
     # *dir* unless it succeeds.
-    def self.extract(path : Path, dir : Path) : Int32
+    def self.extract(path : Path, dir : Path, root : String = "build",
+                     strip_root : Bool = false, executable_modes : Bool = false) : Int32
+      partial_created = false
       Dir.mkdir_p(dir.parent)
       partial = dir.parent / ".#{dir.basename}.#{Random::Secure.hex(4)}"
       Dir.mkdir(partial)
+      partial_created = true
       files = File.open(path) do |file|
-        Compress::Gzip::Reader.open(file) { |gzip| Tar.new(gzip, path).extract(partial) }
+        Compress::Gzip::Reader.open(file) { |gzip| Tar.new(gzip, path, root, strip_root, executable_modes).extract(partial) }
       end
-      raise UserError.new("#{path} holds no files under build/") if files == 0
+      raise UserError.new("#{path} holds no files under #{root}/") if files == 0
       File.rename(partial, dir)
       files
     rescue error : Compress::Gzip::Error
@@ -67,7 +71,7 @@ module Zane
     rescue error : File::Error
       raise UserError.new("cannot unpack #{path}: #{error.message}")
     ensure
-      FileUtils.rm_rf(partial) if partial && Dir.exists?(partial)
+      FileUtils.rm_rf(partial) if partial_created && partial && Dir.exists?(partial)
     end
 
     # A tar stream, in the ustar layout with the pax and GNU long-name
@@ -75,7 +79,8 @@ module Zane
     private class Tar
       BLOCK = 512
 
-      def initialize(@io : IO, @archive : Path)
+      def initialize(@io : IO, @archive : Path, @root : String, @strip_root : Bool,
+                     @executable_modes : Bool)
       end
 
       def extract(dir : Path) : Int32
@@ -97,7 +102,7 @@ module Zane
           when 'L'
             long_name = String.new(read_data(size)).rstrip('\0')
           when '0', '\0', '7'
-            files += 1 if write(dir, name, size)
+            files += 1 if write(dir, name, size, octal(header[100, 8], "mode"))
           when '5'
             make_dir(dir, name)
             skip(size)
@@ -144,7 +149,9 @@ module Zane
         refuse("an entry's #{what} is too large") if bytes[0] & 0x80 != 0
         text = field(bytes).strip
         return 0_i64 if text.empty?
-        text.to_i64?(8) || refuse("an entry's #{what} is not a number")
+        value = text.to_i64?(8) || refuse("an entry's #{what} is not a number")
+        refuse("an entry's #{what} is negative") if value < 0
+        value
       end
 
       private def check_sum(header : Bytes) : Nil
@@ -154,7 +161,7 @@ module Zane
         refuse("an entry's header is corrupt") unless sum == expected
       end
 
-      # *name* as a path under *dir*, refused unless it is under `build/` and
+      # *name* as a path under *dir*, refused unless it is under the allowed root and
       # cannot leave it. Nil for the archive's top directory itself.
       private def target(dir : Path, name : String) : Path?
         refuse("#{name} is an absolute path") if name.starts_with?('/')
@@ -163,7 +170,9 @@ module Zane
           refuse("#{name} leaves the directory it is unpacked into")
         end
         return nil if parts.empty?
-        refuse("#{name} is outside build/") unless parts.first == "build"
+        refuse("#{name} is outside #{@root}/") unless parts.first == @root
+        parts.shift if @strip_root
+        return nil if parts.empty?
         dir.join(parts)
       end
 
@@ -173,15 +182,18 @@ module Zane
         end
       end
 
-      private def write(dir : Path, name : String, size : Int64) : Bool
-        path = target(dir, name) || refuse("#{name} is a file outside build/")
-        refuse("#{name} is not under build/") if path.parent == dir
+      private def write(dir : Path, name : String, size : Int64, mode : Int64) : Bool
+        path = target(dir, name) || refuse("#{name} is a file outside #{@root}/")
+        refuse("#{name} is not under #{@root}/") if !@strip_root && path.parent == dir
         refuse("#{name} is in the archive twice") if File.exists?(path)
         Dir.mkdir_p(path.parent)
         File.open(path, "wb") do |file|
           copied = IO.copy(@io, file, size)
           refuse("the archive ends inside #{name}") if copied < size
         end
+        # Toolchains need executable wrappers and binaries. Discard ownership,
+        # setuid and other special bits; package objects keep their old modes.
+        File.chmod(path, mode & 0o111 == 0 ? 0o644 : 0o755) if @executable_modes
         skip_padding(size)
         true
       end
