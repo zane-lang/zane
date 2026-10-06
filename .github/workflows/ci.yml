@@ -3,15 +3,35 @@ name: CI
 # Every push to any branch, which covers a pull request from this repository.
 # A pull request from a fork runs on the pull_request event instead; the jobs
 # skip it for one from this repository, which its push already ran.
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        description: Version embedded in a release binary
+        type: string
+        default: ''
+
+env:
+  ZANE_CLI_VERSION: ${{ inputs.version || '' }}
 
 permissions:
   contents: read
 
 jobs:
+  installers:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash test/install.sh
+      - run: bash test/release-tag.sh
+      - run: shellcheck install.sh test/install.sh .github/scripts/release-tag.sh test/release-tag.sh
+
   # Alpine, because only musl links a fully static binary.
   linux:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container: crystallang/crystal:latest-alpine
     steps:
@@ -27,13 +47,16 @@ jobs:
           file build/zane
           file build/zane | grep -q 'statically linked'
       - run: build/zane --version
+      - name: Check the release version
+        if: inputs.version != ''
+        run: test "$(build/zane --version)" = "zane $ZANE_CLI_VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: zane-linux-x86_64
           path: build/zane
 
   macos:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,20 +64,26 @@ jobs:
           submodules: true
       - uses: crystal-lang/install-crystal@v1
       - uses: extractions/setup-just@v2
+      - run: bash test/install.sh
       - run: just test
       - run: just release
+      - name: Check the architecture
+        run: test "$(uname -m)" = arm64
       - name: The binary links only system libraries
         run: |
           otool -L build/zane
           ! otool -L build/zane | tail -n +2 | grep -v -e '^\s*/usr/lib/' -e '^\s*/System/'
       - run: build/zane --version
+      - name: Check the release version
+        if: inputs.version != ''
+        run: test "$(build/zane --version)" = "zane $ZANE_CLI_VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: zane-macos-arm64
           path: build/zane
 
   windows:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: windows-latest
     defaults:
       run:
@@ -66,9 +95,18 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
       - uses: crystal-lang/install-crystal@v1
       - uses: extractions/setup-just@v2
+      - name: Test the Windows installer
+        shell: pwsh
+        run: ./test/install.ps1
+      - name: Test the installer with Windows PowerShell 5.1
+        shell: powershell
+        run: ./test/install.ps1
       - run: just test
       - run: just release
       - run: build/zane.exe --version
+      - name: Check the release version
+        if: inputs.version != ''
+        run: test "$(build/zane.exe --version)" = "zane $ZANE_CLI_VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: zane-windows-x86_64
