@@ -97,6 +97,9 @@ jobs:
       - name: Test the Windows installer
         shell: pwsh
         run: ./test/install.ps1
+      - name: Test the installer with Windows PowerShell 5.1
+        shell: powershell
+        run: ./test/install.ps1
       - run: just test
       - run: just release
       - run: build/zane.exe --version
