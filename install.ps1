@@ -53,7 +53,7 @@ try {
     Copy-Item -LiteralPath $binary -Destination $staged
     if (Test-Path -LiteralPath $destination) {
         # Replace atomically, and fail without deleting the old file if it is in use.
-        [IO.File]::Replace($staged, $destination, $null)
+        [IO.File]::Replace($staged, $destination, [NullString]::Value)
     } else {
         [IO.File]::Move($staged, $destination)
     }

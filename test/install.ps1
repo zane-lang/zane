@@ -7,15 +7,17 @@ $originalUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $originalPath = $env:Path
 $originalArchitecture = $env:PROCESSOR_ARCHITECTURE
 $originalArchitectureW6432 = $env:PROCESSOR_ARCHITEW6432
-$script:failure = $false
-$script:corrupt = $false
-$script:requests = @()
-$script:contents = [Text.Encoding]::UTF8.GetBytes('test release binary')
+$zaneTestState = @{
+    Failure = $false
+    Corrupt = $false
+    Requests = @()
+    Contents = [Text.Encoding]::UTF8.GetBytes('test release binary')
+}
 
 function Invoke-WebRequest {
     param($Uri, $OutFile, [switch]$UseBasicParsing)
-    $script:requests += $Uri
-    if ($script:failure) { throw 'Simulated failed download' }
+    $zaneTestState.Requests += $Uri
+    if ($zaneTestState.Failure) { throw 'Simulated failed download' }
     switch ($Uri) {
         'https://github.com/zane-lang/zane/releases/latest' {
             return [pscustomobject]@{ BaseResponse = [pscustomobject]@{
@@ -23,12 +25,12 @@ function Invoke-WebRequest {
             } }
         }
         'https://github.com/zane-lang/zane/releases/download/v0.0/zane-windows-x86_64.exe' {
-            $bytes = if ($script:corrupt) { [byte[]]@(1, 2, 3) } else { $script:contents }
+            $bytes = if ($zaneTestState.Corrupt) { [byte[]]@(1, 2, 3) } else { $zaneTestState.Contents }
             [IO.File]::WriteAllBytes($OutFile, $bytes)
         }
         'https://github.com/zane-lang/zane/releases/download/v0.0/SHA256SUMS' {
             $sha = [Security.Cryptography.SHA256]::Create()
-            try { $hash = [BitConverter]::ToString($sha.ComputeHash($script:contents)).Replace('-', '').ToLowerInvariant() }
+            try { $hash = [BitConverter]::ToString($sha.ComputeHash($zaneTestState.Contents)).Replace('-', '').ToLowerInvariant() }
             finally { $sha.Dispose() }
             [IO.File]::WriteAllText($OutFile, "$hash  zane-windows-x86_64.exe`n")
         }
@@ -38,7 +40,7 @@ function Invoke-WebRequest {
 
 function Assert-Installed {
     $actual = [IO.File]::ReadAllBytes((Join-Path $installDir 'zane.exe'))
-    if ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($script:contents)) {
+    if ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($zaneTestState.Contents)) {
         throw 'Installed binary changed unexpectedly'
     }
 }
@@ -61,19 +63,19 @@ try {
     [Environment]::SetEnvironmentVariable('Path', '', 'User')
     & "$root/install.ps1" -InstallDir $installDir
     Assert-Installed
-    if ($script:requests.Count -ne 3) { throw 'Latest was not resolved exactly once' }
+    if ($zaneTestState.Requests.Count -ne 3) { throw 'Latest was not resolved exactly once' }
     if (($env:Path -split ';') -notcontains $installDir) { throw 'Current PATH was not updated' }
     if ([Environment]::GetEnvironmentVariable('Path', 'User') -ne $installDir) { throw 'User PATH was not updated' }
     [IO.File]::WriteAllText((Join-Path $installDir 'zane.exe'), 'old binary')
     & "$root/install.ps1" -Version v0.0 -InstallDir $installDir
     Assert-Installed
-    $script:corrupt = $true
+    $zaneTestState.Corrupt = $true
     Expect-Failure v0.0
-    $script:corrupt = $false
-    $script:failure = $true
+    $zaneTestState.Corrupt = $false
+    $zaneTestState.Failure = $true
     Expect-Failure v0.0
     Expect-Failure latest
-    $script:failure = $false
+    $zaneTestState.Failure = $false
     Expect-Failure 'v0.0; unexpected'
     Expect-Failure "v0.0`n"
     Expect-Failure v00.0
