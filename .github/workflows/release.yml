@@ -31,6 +31,9 @@ jobs:
           VERSION: ${{ inputs.version }}
           SOURCE_REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
@@ -42,14 +45,7 @@ jobs:
             echo "::error::Use a tag such as v0.0 or v0.1.0."
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION"; then
-            echo "::error::Tag $VERSION already exists; choose a new version."
-            exit 1
-          else
-            status=$?
-            # git returns 2 for no matching tag; other errors must stop the release.
-            if [[ "$status" != 2 ]]; then exit "$status"; fi
-          fi
+          bash .github/scripts/release-tag.sh check
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   build:
@@ -92,9 +88,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Creating the ref atomically also refuses a tag created during the builds.
-          gh api --method POST "repos/$GH_REPO/git/refs" --silent \
-            -f ref="refs/tags/$VERSION" -f sha="$SOURCE_SHA"
+          bash .github/scripts/release-tag.sh create
           gh release create "$VERSION" dist/* --verify-tag \
             --title "$VERSION" --generate-notes --draft
       - name: Publish the complete release

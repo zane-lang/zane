@@ -97,6 +97,12 @@ installers and `SHA256SUMS` to a draft release, then publishes it as latest.
 No source version edit, local tag, manual push, or extra token is required.
 Only the publishing job has write access.
 
-An existing tag is refused. If uploading fails, the release remains a draft:
-inspect and finish or remove that draft before retrying; do not replace a
-published version's tag or assets.
+An existing tag is reused only when it points to the exact source commit and
+has no release. If tag creation succeeds but release creation fails, use
+**Re-run failed jobs** on the original Actions run: it keeps the original
+commit and reuses the successful builds. A tag pointing elsewhere, or a draft
+or published release for that tag, is refused.
+
+If uploading fails, inspect and finish the draft, or remove the draft before
+retrying the failed job. Keep its tag; do not replace a published version's
+tag or assets.

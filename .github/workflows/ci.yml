@@ -26,7 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash test/install.sh
-      - run: shellcheck install.sh test/install.sh
+      - run: bash test/release-tag.sh
+      - run: shellcheck install.sh test/install.sh .github/scripts/release-tag.sh test/release-tag.sh
 
   # Alpine, because only musl links a fully static binary.
   linux:
