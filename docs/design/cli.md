@@ -95,12 +95,18 @@ directory untouched. It then writes:
 - `zane-lock.coda`, holding only the reserved `zane` row;
 - `src/main.zn` with a `main` for an application, or `src/<name>.zn` with one
   public example function for a library;
+- for a library, `test/main.zn`, a test package whose `main` imports the
+  library and calls that function
+  ([`packages.md` §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#7-the-test-package));
 - `.gitignore` listing `out/`, appended to if one exists.
 
 ### 2.2 `zane check`
 
 Runs the compiler up to and including semantic checking and stops. This is the
-fast loop while editing. It works from any directory inside the project, as
+fast loop while editing. In a library with a `test/` directory it checks the
+test package as well, in the test build of §2.5, so a change to the library
+that breaks its tests shows up here. It works from any directory inside the
+project, as
 every command below does: `zane` looks for `zane.coda` there and in each
 directory above.
 
@@ -126,7 +132,22 @@ and exits with its status. It does not optimize, which makes the build about
 three times faster; the program means the same either way, so only its speed
 differs from what `build` makes. It refuses a library.
 
-### 2.5 `zane clean`
+### 2.5 `zane test [-- ARGS]`
+
+Builds the library's test build for the host into `out/test/<name>`, then runs
+it with `ARGS` and exits with its status, unoptimized as `run` is. The test
+package in `test/` is the root and the program; the library is compiled from
+`src/` as its dependency
+([`packages.md` §7.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#72-the-test-package-is-the-root-of-a-test-build)).
+The graph is the project's `deps` and `test-deps` together
+([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)).
+It refuses an application, and a library with no `.zn` file in `test/`.
+
+What a test does and how it reports is the test package's own business: `zane`
+runs one program and passes on its exit status, so a testing library in
+`test-deps` decides how failures are counted and shown.
+
+### 2.6 `zane clean`
 
 Deletes `out/`.
 
@@ -140,27 +161,32 @@ they always change the two files together
 
 | Command | Does |
 |---|---|
-| `zane add <url> [tag] [--as key] [--from-source]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Fetches the library and everything it depends on for the host before writing either file, so a missing artifact shows up immediately and a library that cannot be used is never recorded. Refuses a package whose `kind` is `application`. Prints the `import` line to use. |
-| `zane remove <key>` | Removes the key from both files, and warns about each line of `src/` that still imports it. |
+| `zane add <url> [tag] [--as key] [--from-source] [--test]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Fetches the library and everything it depends on for the host before writing either file, so a missing artifact shows up immediately and a library that cannot be used is never recorded. Refuses a package whose `kind` is `application`. Prints the `import` line to use. With `--test`, writes the row into `test-deps` instead of `deps`, and refuses to in an application project. |
+| `zane remove <key>` | Removes the key, from `deps` or `test-deps`, from both files, and warns about each line of `src/` or `test/` that still imports it. |
 | `zane update [key [tag]] [--accept-tag-move]` | Moves one key, or every key, to the tag named, or else the newest, and pins its commit. A tag that now points to another commit than the lock file pins has moved, and is refused with a security error without the flag. |
 | `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. |
 | `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
 | `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. |
-| `zane tree` | Prints the resolved graph: each package under what depends on it, with its key, tag, URL and where its code comes from. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
+| `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, URL and where its code comes from. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
 
-`add`, `update` and `dev` fetch the changed graph for the host before writing
-either file, as `add` does, so a change that leaves the project unable to build
+`update` and `dev` apply to a `test-deps` key as to a `deps` key. `add`, `update`
+and `dev` fetch the changed graph for the host before writing either file, as
+`add` does, so a change that leaves the project unable to build
 is refused and nothing is written. `remove`, `remap` and `unremap` write without
-fetching. `check`, `build` and `run` resolve and fetch the graph as §3.1 says,
+fetching. `check`, `build`, `run` and `test` resolve and fetch the graph as §3.1 says,
 and warn about each URL in `remaps` that names no package of the graph
 ([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
 
 ### 3.1 Fetching
 
-`check`, `build`, `run`, `fetch` and `add` each read the graph from the
+`check`, `build`, `run`, `test`, `fetch` and `add` each read the graph from the
 project's two files and, recursively, from each dependency's own two files at
 its pinned commit ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)).
-Only `check` stops before the objects: it needs the sources alone.
+Only `check` stops before the objects: it needs the sources alone. The
+project's `test-deps` rows join the graph for `test`, `fetch`, and `check` of a
+library with a `test/` directory, and never for `build` or `run`; a
+dependency's own `test-deps` never join it
+([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
 
 - **Sources.** Each version of each package is cloned at its tag into the
   cache, `~/.zane/packages/<normalized url>/<tag>/src/`, and refused with a
@@ -298,6 +324,22 @@ COFF, and stamped `--package` names, `--import` and `--remap` since #156.
 A `.zn` file in a subdirectory of `src/` is an error. `zane` reports it before
 calling the compiler, since it is the one listing the files.
 
+A test build needs no flag of its own. `zane` passes the test package first,
+as `--package test=test/`, so it is the root, then the library unstamped, as
+`--package NAME=src/`, which the compiler builds in the same compilation as
+the root
+([compiler `separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md) C1).
+The root is given `--kind application`, so a test package without `main` is
+the compile-time error the spec requires. `--import test:NAME=NAME` joins the
+two, and the test package's other keys come from `deps` and `test-deps`, the
+library's from `deps` alone, so an import of a `test-deps` key in `src/` names
+no package. `zane` reports the rest of
+[`packages.md` §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#7-the-test-package)
+before calling the compiler, as it does for `src/`: a `.zn` file in a
+subdirectory of `test/` or in an application's `test/`, a key equal to the
+library's name, and a manifest named `test`, using `test` as a key, or holding
+`test-deps` in an application.
+
 The full contract is written down in the compiler repository, beside the flags
 it describes.
 
@@ -313,6 +355,8 @@ it describes.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
 4. **Toolchains.** `toolchain install [tag]` is implemented; `toolchain use`
    remains to come.
+5. **Tests.** `test`, the `test-deps` block, `add --test`, `tree --test`, and
+   the test package `init` writes for a library (§2.5).
 
 `zane` runs the first compiler it finds of: the one `ZANE_COMPILER` names, the
 toolchain installed for the project's `zane-version` (§4.1), and `zanec` on
