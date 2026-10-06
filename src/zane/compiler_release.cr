@@ -63,7 +63,7 @@ module Zane
       tags
     end
 
-    private def self.read_record(record : Path) : {String, String}
+    def self.read_record(record : Path) : {String, String}
       Coda::Doc.parse_file(record) do |doc|
         root = doc.root
         {root["url"].as_string.value, root["commit"].as_string.value}

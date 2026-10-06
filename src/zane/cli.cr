@@ -4,6 +4,7 @@ require "./commands/build"
 require "./commands/cache"
 require "./commands/deps"
 require "./commands/init"
+require "./commands/toolchain"
 
 module Zane::CLI
   USAGE = <<-TEXT
@@ -24,6 +25,7 @@ module Zane::CLI
       fetch                  fetch what a build needs, so it can then run offline
       tree                   show the packages the project depends on
       cache list|path|clean  show, locate or empty the package cache
+      toolchain install [version]  install the latest compiler release, or the version named
       help                   show this text
       version                show the version of zane
 
@@ -41,19 +43,20 @@ module Zane::CLI
       stdout.puts "zane #{VERSION}"
     when "init"
       Commands::Init.new(args[1..], stdin, stdout, interactive).run
-    when "check"   then return Commands::Check.new(args[1..], stdout, stderr).run
-    when "build"   then return Commands::Build.new(args[1..], stdout, stderr).run
-    when "run"     then return Commands::Run.new(args[1..], stdout, stderr).run
-    when "clean"   then return Commands::Clean.new(args[1..], stdout, stderr).run
-    when "add"     then return Commands::Add.new(args[1..], stdout, stderr).run
-    when "fetch"   then return Commands::Fetch.new(args[1..], stdout, stderr).run
-    when "remove"  then return Commands::Remove.new(args[1..], stdout, stderr).run
-    when "update"  then return Commands::Update.new(args[1..], stdout, stderr).run
-    when "dev"     then return Commands::Dev.new(args[1..], stdout, stderr).run
-    when "remap"   then return Commands::Remap.new(true, args[1..], stdout, stderr).run
-    when "unremap" then return Commands::Remap.new(false, args[1..], stdout, stderr).run
-    when "tree"    then return Commands::Tree.new(args[1..], stdout, stderr).run
-    when "cache"   then return Commands::Cache.new(args[1..], stdout, stderr).run
+    when "check"     then return Commands::Check.new(args[1..], stdout, stderr).run
+    when "build"     then return Commands::Build.new(args[1..], stdout, stderr).run
+    when "run"       then return Commands::Run.new(args[1..], stdout, stderr).run
+    when "clean"     then return Commands::Clean.new(args[1..], stdout, stderr).run
+    when "add"       then return Commands::Add.new(args[1..], stdout, stderr).run
+    when "fetch"     then return Commands::Fetch.new(args[1..], stdout, stderr).run
+    when "remove"    then return Commands::Remove.new(args[1..], stdout, stderr).run
+    when "update"    then return Commands::Update.new(args[1..], stdout, stderr).run
+    when "dev"       then return Commands::Dev.new(args[1..], stdout, stderr).run
+    when "remap"     then return Commands::Remap.new(true, args[1..], stdout, stderr).run
+    when "unremap"   then return Commands::Remap.new(false, args[1..], stdout, stderr).run
+    when "tree"      then return Commands::Tree.new(args[1..], stdout, stderr).run
+    when "cache"     then return Commands::Cache.new(args[1..], stdout, stderr).run
+    when "toolchain" then return Commands::Toolchain.new(args[1..], stdout, stderr).run
     else
       stderr.puts "zane: unknown command `#{args.first}`"
       stderr.puts USAGE

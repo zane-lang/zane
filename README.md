@@ -46,9 +46,33 @@ and inspect the scripts before running them. No administrator access is needed.
 
 ### The compiler
 
-The CLI does not bundle or automatically download `zanec` yet. Build the
-[compiler](https://github.com/zane-lang/compiler), then put `zanec` on your
-`PATH`, or point the CLI directly at it:
+Install the latest published compiler toolchain, or choose a version:
+
+```sh
+zane toolchain install
+zane toolchain install v3.0
+```
+
+The version is a compiler tag, independent of the CLI's own version. Omit it
+to use GitHub's latest published compiler release, even if an older toolchain
+is already installed. Installation works outside a project and verifies the
+archive's SHA-256 and its compiler commit before making it available.
+
+Toolchains live side by side in `~/.zane/toolchains/<version>/`, or under
+`ZANE_HOME`. Projects use the version their `zane-version` field pins;
+installing a newer compiler does not update that field. `zane init` uses the
+newest installed compiler, and `zane check`, `build` and `run` find it
+automatically. No extra `PATH` setup is needed for the compiler.
+
+The compiler release workflow currently provides **Linux x86_64** archives,
+including LLVM libraries and Zig for building Linux and Windows programs.
+Other CLI host platforms report a missing compiler archive until native
+compiler releases are available for them. A tag without binary assets, such
+as the original `v0.0`, cannot be installed this way.
+
+To test an unreleased compiler or use a host without a binary release, build
+the [compiler](https://github.com/zane-lang/compiler), then put `zanec` on
+your `PATH`, or point the CLI directly at it:
 
 ```sh
 export ZANE_COMPILER=/absolute/path/to/zanec
@@ -66,8 +90,8 @@ cd hello
 zane check
 ```
 
-`init` pins an installed compiler toolchain or a published compiler tag;
-the existing compiler tag `v0.0` works. `ZANE_COMPILER` overrides the compiler
+`init` pins an installed compiler toolchain or a published compiler tag.
+`ZANE_COMPILER` overrides the compiler
 executable used to check and build it.
 
 ## Building
