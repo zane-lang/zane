@@ -199,7 +199,10 @@ describe Zane::Toolchain do
   it "reads the pax long paths used by the compiler release packager" do
     with_toolchains do |registry|
       root = registry.asset("v1.0").rchop(".tar.gz")
-      name = "#{root}/zig/lib/" + "long/" * 25 + "source.h"
+      # Exceed tar's 100-byte name field while keeping the extraction path
+      # below Windows' legacy filesystem path limit in its longer temp dir.
+      name = "#{root}/zig/lib/" + "long/" * 15 + "source.h"
+      name.bytesize.should be > 100
       data = "path=#{name}\n"
       length = data.bytesize + 4
       loop do
@@ -212,7 +215,9 @@ describe Zane::Toolchain do
         {"placeholder", '0', "long path", 0o644},
       ]
       registry.publish("v1.0", archive: toolchain_archive(entries))
-      toolchain_command("install")[0].should eq 0
+      status, _, error = toolchain_command("install")
+      error.should eq ""
+      status.should eq 0
       File.read(Zane::Home.toolchains / "v1.0" / name.lchop("#{root}/")).should eq "long path"
     end
   end
