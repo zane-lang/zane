@@ -14,8 +14,10 @@ module Zane::CLI
       check                  check the project without building it
       build                  build the program into out/
       run                    build the program, then run it
+      test [-- ARGS]         build a library's test package in test/, then run it
       clean                  delete out/
-      add <url> [tag]        depend on the library at url, at its newest tag or the one named
+      add <url> [tag]        depend on the library at url, at its newest tag or the one named;
+                             with --test, for the test package alone
       remove <key>           stop depending on key
       update [key [tag]]     move key, or every dependency, to its newest tag or the one named
       dev <key> <path>       compile key from the local project at path
@@ -23,7 +25,7 @@ module Zane::CLI
       remap <url>            link the interchangeable versions of the package at url as one
       unremap <url>          link its versions side by side again
       fetch                  fetch what a build needs, so it can then run offline
-      tree                   show the packages the project depends on
+      tree [--test]          show the packages the project, or its test build, depends on
       cache list|path|clean  show, locate or empty the package cache
       toolchain install [version]  install the latest compiler release, or the version named
       help                   show this text
@@ -46,6 +48,7 @@ module Zane::CLI
     when "check"     then return Commands::Check.new(args[1..], stdout, stderr).run
     when "build"     then return Commands::Build.new(args[1..], stdout, stderr).run
     when "run"       then return Commands::Run.new(args[1..], stdout, stderr).run
+    when "test"      then return Commands::Test.new(args[1..], stdout, stderr).run
     when "clean"     then return Commands::Clean.new(args[1..], stdout, stderr).run
     when "add"       then return Commands::Add.new(args[1..], stdout, stderr).run
     when "fetch"     then return Commands::Fetch.new(args[1..], stdout, stderr).run

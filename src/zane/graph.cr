@@ -59,6 +59,10 @@ module Zane
       "#{url.normalized} #{tag}"
     end
 
+    # Where the project's `test-deps` edges are kept, beside its own
+    # dependencies under "".
+    TEST_EDGES = "#test"
+
     # Every version the manifests pin, each after every package it depends
     # on.
     getter packages = [] of Package
@@ -83,13 +87,17 @@ module Zane
     # Each version remapping displaced, and the version chosen in its place.
     @chosen = {} of String => Package
 
-    # Reads the graph of *workspace*. *packages* is the cache.
-    def initialize(@workspace : Workspace, @packages_dir : Path = Home.packages)
+    # Reads the graph of *workspace*. *packages* is the cache. When *test*,
+    # it is the graph of a test build, which the project's `test-deps` join
+    # (spec dependencies.md §13); a dependency's own `test-deps` never do.
+    def initialize(@workspace : Workspace, @packages_dir : Path = Home.packages, @test : Bool = false)
       manifest = @workspace.manifest
-      manifest.deps.each do |dep|
+      top = @test ? manifest.all_deps : manifest.deps
+      top.each do |dep|
         @top[Graph.node(PackageUrl.parse(manifest.resolutions[dep.key].url), dep.version)] = dep
       end
-      visit(manifest, "", [] of String)
+      visit(manifest, "", [] of String, manifest.deps)
+      visit(manifest, TEST_EDGES, [] of String, manifest.test_deps) if @test
       @stale_remaps = manifest.remaps.reject do |url|
         normalized = PackageUrl.parse(url).normalized
         @packages.any? { |p| p.url.normalized == normalized }
@@ -100,6 +108,11 @@ module Zane
     # The dependencies the project's manifest pins, in its order.
     def direct : Array(Edge)
       @edges[""]? || [] of Edge
+    end
+
+    # The project's `test-deps`, in its order, in the graph of a test build.
+    def test_direct : Array(Edge)
+      @edges[TEST_EDGES]? || [] of Edge
     end
 
     # The dependencies *package*'s manifest pins, in its order.
@@ -128,7 +141,7 @@ module Zane
     def linked : Array(Package)
       @linked ||= begin
         order = [] of Package
-        link(direct, order, Set(String).new)
+        link(direct + test_direct, order, Set(String).new)
         order
       end
     end
@@ -145,9 +158,10 @@ module Zane
 
     @linked : Array(Package)?
 
-    private def visit(manifest : Manifest, parent : String, chain : Array(String)) : Nil
+    private def visit(manifest : Manifest, parent : String, chain : Array(String),
+                      deps : Array(Dependency) = manifest.deps) : Nil
       edges = @edges[parent] = [] of Edge
-      manifest.deps.each do |dep|
+      deps.each do |dep|
         resolution = manifest.resolutions[dep.key]
         url = PackageUrl.parse(resolution.url)
         if chain.includes?(url.normalized)
@@ -235,10 +249,17 @@ module Zane
     # The compiler's flags for the packages: `--package` for each version
     # linked, and `--import` for the keys of the project and of each of
     # them, after the project's own `--package`. A key that named a displaced
-    # version names its chosen one.
+    # version names its chosen one. In a test build the test package, which
+    # is the root, imports the library by its name and every key of both
+    # blocks, and the library only its `deps` (spec packages.md §7.3).
     def package_flags : Array(String)
       flags = [] of String
       linked.reverse_each { |p| flags.push("--package", "#{p.id}=#{p.sources}") }
+      if @test
+        name = @workspace.name
+        flags.push("--import", "#{Manifest::TEST_PACKAGE}:#{name}=#{name}")
+        flags.concat(imports(Manifest::TEST_PACKAGE, direct + test_direct, remapped: true))
+      end
       flags.concat(imports(@workspace.name, direct, remapped: true))
       linked.reverse_each { |p| flags.concat(imports(p.id, dependencies(p), remapped: true)) }
       flags

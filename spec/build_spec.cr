@@ -11,7 +11,7 @@ end
 # The variables a project example sets, restored after it.
 PROJECT_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS)
 
-private def with_project(kind = "application", deps = "", &)
+private def with_project(kind = "application", deps = "", extra = "", &)
   root = Path[File.join(Dir.tempdir, "zane-spec-#{Random::Secure.hex(6)}")]
   Dir.mkdir_p(root / "src")
   File.write(root / "zane.coda", <<-CODA)
@@ -23,6 +23,7 @@ private def with_project(kind = "application", deps = "", &)
     deps [
         key version from
     #{deps}]
+    #{extra}
     CODA
   File.write(root / "zane-lock.coda", <<-CODA)
     resolutions [
@@ -207,6 +208,74 @@ describe Zane::Commands do
     with_project do |root|
       expect_raises(Zane::UserError, "unexpected argument extra") do
         zane(Zane::Commands::Run, ["extra"], root)
+      end
+    end
+  end
+
+  it "checks a library's test build after the library, with the test package as the root" do
+    with_project(kind: "library") do |root, log|
+      Dir.mkdir_p(root / "test")
+      File.write(root / "test" / "main.zn", "package test;\n")
+      zane(Zane::Commands::Check, [] of String, root).should eq({0, "", ""})
+      logged(log).should eq [
+        "--check --kind library --package demo=#{root / "src"}",
+        "--check --kind application --package test=#{root / "test"} --package demo=#{root / "src"} --import test:demo=demo",
+      ]
+    end
+  end
+
+  it "builds the test build into out/test and runs it with the arguments after --" do
+    with_project(kind: "library") do |root, log|
+      Dir.mkdir_p(root / "test")
+      File.write(root / "test" / "main.zn", "package test;\n")
+      ENV["FAKE_PROGRAM_STATUS"] = "4"
+      zane(Zane::Commands::Test, ["--", "x"], root).should eq({4, "program ran with [x]\n", ""})
+      program = root / "out" / "test" / {{ flag?(:win32) ? "demo.exe" : "demo" }}
+      logged(log).should eq [
+        "--build #{program} --kind application --package test=#{root / "test"} --package demo=#{root / "src"} --import test:demo=demo",
+      ]
+    end
+  end
+
+  it "does not run a test build that failed to build" do
+    with_project(kind: "library") do |root|
+      Dir.mkdir_p(root / "test")
+      File.write(root / "test" / "main.zn", "package test;\n")
+      ENV["FAKE_ZANEC_STATUS"] = "1"
+      zane(Zane::Commands::Test, [] of String, root).should eq({1, "", "fake compiler error\n"})
+    end
+  end
+
+  it "refuses to test an application, or a library with no test package" do
+    with_project do |root, log|
+      expect_raises(Zane::UserError, "`demo` is an application, which has no test package") do
+        zane(Zane::Commands::Test, [] of String, root)
+      end
+      logged(log).should be_empty
+    end
+    with_project(kind: "library") do |root, log|
+      Dir.mkdir_p(root / "test")
+      expect_raises(Zane::UserError, "`demo` has no test package") do
+        zane(Zane::Commands::Test, [] of String, root)
+      end
+      zane(Zane::Commands::Check, [] of String, root)[0].should eq 0
+      logged(log).size.should eq 1
+    end
+  end
+
+  it "holds the test package to the rules of packages.md §7" do
+    with_project do |root|
+      Dir.mkdir_p(root / "test")
+      File.write(root / "test" / "main.zn", "package test;\n")
+      expect_raises(Zane::UserError, "is in test/, but an application has no test package") do
+        zane(Zane::Commands::Check, [] of String, root)
+      end
+    end
+    with_project(kind: "library") do |root|
+      Dir.mkdir_p(root / "test" / "nested")
+      File.write(root / "test" / "nested" / "more.zn", "package test;\n")
+      expect_raises(Zane::UserError, "is in a subdirectory of test/") do
+        zane(Zane::Commands::Check, [] of String, root)
       end
     end
   end

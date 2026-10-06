@@ -191,6 +191,8 @@ module Zane::Commands
         File.write(root / "src" / "main.zn", application_source(name))
       else
         File.write(root / "src" / "#{name}.zn", library_source(name))
+        Dir.mkdir_p(root / "test")
+        File.write(root / "test" / "main.zn", test_source(name))
       end
 
       ignore = root / ".gitignore"
@@ -222,6 +224,39 @@ module Zane::Commands
 
         /// Every declaration is public unless its name starts with `_`.
         Int double(n Int) => n + n
+
+        ZANE
+    end
+
+    # The library's test package, which imports it as any consumer does
+    # (spec packages.md §7); `zane test` builds and runs it.
+    private def test_source(name : String) : String
+      <<-ZANE
+        package test;
+
+        import #{name};
+
+        alias Int = @primitives$Int
+        alias Bool = @primitives$Bool
+        alias Unit = @primitives$Unit
+        alias String = @primitives$String
+
+        Unit check(ok Bool) {
+        \tpassed String("ok\\n");
+        \tfailed String("failed\\n");
+        \t@controlflow$branch(ok, {
+        \t\t@program$console!print(passed);
+        \t});
+        \t@controlflow$branch(~ok, {
+        \t\t@program$console!print(failed);
+        \t});
+        \treturn Unit();
+        }
+
+        Unit main() {
+        \tcheck(#{name}$double(Int(21)) == Int(42));
+        \treturn Unit();
+        }
 
         ZANE
     end

@@ -3,8 +3,14 @@ require "./errors"
 require "./project"
 
 module Zane
-  # One `deps` row of a manifest (spec dependencies.md §2.1).
-  record Dependency, key : String, version : String, from : String do
+  # One `deps` row of a manifest, or a `test-deps` row when *test* (spec
+  # dependencies.md §2.1).
+  record Dependency, key : String, version : String, from : String, test : Bool = false do
+    # The manifest block the row is in.
+    def block : String
+      test ? Manifest::TEST_DEPS : Manifest::DEPS
+    end
+
     def release? : Bool
       from == "release"
     end
@@ -31,6 +37,13 @@ module Zane
     # The lock row that pins the compiler rather than a dependency.
     COMPILER_KEY = "zane"
 
+    DEPS      = "deps"
+    TEST_DEPS = "test-deps"
+
+    # The name of a library's test package, which no manifest may take and
+    # no key may be (spec packages.md §7.1, dependencies.md §2.1).
+    TEST_PACKAGE = "test"
+
     # A commit hash, whole or abbreviated.
     COMMIT = /\A[0-9a-f]{7,64}\z/
 
@@ -40,10 +53,12 @@ module Zane
     getter zane_version : String?
     getter version_pattern : String
     getter deps : Array(Dependency)
+    # The dependencies only the test package imports (packages.md §7.3).
+    getter test_deps : Array(Dependency)
     getter remaps : Array(String)
     getter resolutions : Hash(String, Resolution)
 
-    def initialize(@root, @name, @kind, @zane_version, @version_pattern, @deps, @remaps, @resolutions)
+    def initialize(@root, @name, @kind, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions)
     end
 
     def self.path?(from : String) : Bool
@@ -66,6 +81,9 @@ module Zane
       unless Project.valid_name?(name)
         raise UserError.new("#{path}: `#{name}` is not a package name")
       end
+      if name == TEST_PACKAGE
+        raise UserError.new("#{path}: `#{TEST_PACKAGE}` is the name of a library's test package, and no project's")
+      end
       kind = case value = field(doc, "kind", path)
              when "application" then Project::Kind::Application
              when "library"     then Project::Kind::Library
@@ -77,7 +95,15 @@ module Zane
       if error = Project.version_pattern_error(pattern)
         raise UserError.new("#{path}: `#{pattern}` is not a version pattern: #{error}")
       end
-      new(root, name, kind, zane_version, pattern, read_deps(doc, path), read_remaps(doc, path), read_lock(root))
+      deps = read_deps(doc, path, DEPS)
+      test_deps = read_deps(doc, path, TEST_DEPS)
+      if kind.application? && doc.has_key?(TEST_DEPS)
+        raise UserError.new("#{path}: an application has no test package, so no `#{TEST_DEPS}`")
+      end
+      if both = test_deps.find { |t| deps.any? { |d| d.key == t.key } }
+        raise UserError.new("#{path}: `#{both.key}` is in both `#{DEPS}` and `#{TEST_DEPS}`")
+      end
+      new(root, name, kind, zane_version, pattern, deps, test_deps, read_remaps(doc, path), read_lock(root))
     end
 
     private def self.field(doc : Coda::Block, key : String, path : Path) : String
@@ -85,12 +111,12 @@ module Zane
       node.as?(Coda::StringNode).try(&.value) || raise UserError.new("#{path}: `#{key}` is not a single value")
     end
 
-    private def self.read_deps(doc : Coda::Block, path : Path) : Array(Dependency)
+    private def self.read_deps(doc : Coda::Block, path : Path, block : String) : Array(Dependency)
       deps = [] of Dependency
-      node = doc["deps"]? || return deps
+      node = doc[block]? || return deps
       table = node.as?(Coda::KeyedTable)
       unless table && table.columns.includes?("version") && table.columns.includes?("from")
-        raise UserError.new("#{path}: `deps` is a table of `key`, `version` and `from`")
+        raise UserError.new("#{path}: `#{block}` is a table of `key`, `version` and `from`")
       end
       table.each do |key, row|
         unless Project.valid_name?(key)
@@ -99,12 +125,15 @@ module Zane
         if key == COMPILER_KEY
           raise UserError.new("#{path}: `#{COMPILER_KEY}` is reserved for the compiler, and is not a dependency key")
         end
+        if key == TEST_PACKAGE
+          raise UserError.new("#{path}: `#{TEST_PACKAGE}` is the name of a library's test package, and is not a dependency key")
+        end
         version = row["version"]? || raise UserError.new("#{path}: `#{key}` has no version")
         from = row["from"]? || raise UserError.new("#{path}: `#{key}` has no `from`")
         unless from == "release" || from == "source" || path?(from)
           raise UserError.new("#{path}: `#{key}` comes from `#{from}`; it is `release`, `source`, or a path starting with `./`, `../` or `/`")
         end
-        deps << Dependency.new(key, version, from)
+        deps << Dependency.new(key, version, from, block == TEST_DEPS)
       end
       deps
     end
@@ -143,10 +172,11 @@ module Zane
       raise UserError.new("#{path}: #{error.message}")
     end
 
-    # Every `deps` key and the compiler's key have exactly one lock row, and
-    # the lock has no other (§2.2). Anything else is refused, not guessed at.
+    # Every `deps` and `test-deps` key and the compiler's key have exactly
+    # one lock row, and the lock has no other (§2.2). Anything else is
+    # refused, not guessed at.
     protected def check_lock(path : Path) : Nil
-      keys = @deps.map(&.key) << COMPILER_KEY
+      keys = all_deps.map(&.key) << COMPILER_KEY
       missing = keys.reject { |k| @resolutions.has_key?(k) }
       extra = @resolutions.keys - keys
       return if missing.empty? && extra.empty?
@@ -157,16 +187,28 @@ module Zane
     end
 
     # The manifest with *dep* locked to *resolution*: in place of the
-    # dependency with its key, or after the others when there is none.
+    # dependency with its key, or after the others of its block when there
+    # is none.
     def with_dependency(dep : Dependency, resolution : Resolution) : Manifest
       resolutions = @resolutions.dup
       resolutions[dep.key] = resolution
-      deps = dependency?(dep.key) ? @deps.map { |d| d.key == dep.key ? dep : d } : @deps + [dep]
-      Manifest.new(@root, @name, @kind, @zane_version, @version_pattern, deps, @remaps, resolutions)
+      deps, test_deps = @deps, @test_deps
+      if dep.test
+        test_deps = test_deps.any? { |d| d.key == dep.key } ? test_deps.map { |d| d.key == dep.key ? dep : d } : test_deps + [dep]
+      else
+        deps = deps.any? { |d| d.key == dep.key } ? deps.map { |d| d.key == dep.key ? dep : d } : deps + [dep]
+      end
+      Manifest.new(@root, @name, @kind, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions)
     end
 
+    # Every dependency: the `deps` rows, then the `test-deps` rows.
+    def all_deps : Array(Dependency)
+      @deps + @test_deps
+    end
+
+    # The dependency *key*, in either block.
     def dependency?(key : String) : Dependency?
-      @deps.find { |d| d.key == key }
+      all_deps.find { |d| d.key == key }
     end
   end
 end

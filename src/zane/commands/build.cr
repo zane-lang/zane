@@ -23,6 +23,7 @@ module Zane::Commands
   abstract class ProjectCommand
     @workspace : Workspace? = nil
     @graph : Graph? = nil
+    @test_graph : Graph? = nil
 
     # *dir* is where the command runs from, and *toolchains* where compilers
     # are installed; tests change both.
@@ -54,12 +55,18 @@ module Zane::Commands
     end
 
     private def workspace : Workspace
-      @workspace ||= Workspace.find(@dir).tap(&.check_sources)
+      @workspace ||= Workspace.find(@dir).tap(&.check_sources).tap(&.check_tests)
     end
 
     # The packages the project depends on, their sources fetched.
     private def graph : Graph
       @graph ||= Graph.new(workspace).tap { |g| Commands.report(g, @error) }
+    end
+
+    # The packages a test build depends on: the project's `deps` and
+    # `test-deps` together (spec dependencies.md §13).
+    private def test_graph : Graph
+      @test_graph ||= Graph.new(workspace, test: true).tap { |g| Commands.report(g, @error) unless @graph }
     end
 
     private def compiler : Compiler
@@ -71,6 +78,16 @@ module Zane::Commands
     private def project_flags : Array(String)
       ws = workspace
       ["--kind", ws.kind.to_s, "--package", "#{ws.name}=#{ws.source_dir}"] + graph.package_flags
+    end
+
+    # The compiler's flags for the test build: the test package first, so it
+    # is the root, with `main` required of it, then the library unstamped,
+    # which is compiled with it (spec packages.md §7.2; compiler
+    # docs/design/separate-compilation.md C1).
+    private def test_flags : Array(String)
+      ws = workspace
+      ["--kind", "application", "--package", "#{Manifest::TEST_PACKAGE}=#{ws.test_dir}",
+       "--package", "#{ws.name}=#{ws.source_dir}"] + test_graph.package_flags
     end
 
     # Builds the application for *target*, the host when nil, into *path*,
@@ -98,14 +115,17 @@ module Zane::Commands
     abstract def run : Int32
   end
 
-  # `zane check` (§2.2): semantics and nothing after it.
+  # `zane check` (§2.2): semantics and nothing after it, for the library's
+  # test build as well when it has a test package.
   class Check < ProjectCommand
     def usage : String
       "usage: zane check"
     end
 
     def run : Int32
-      compiler.run(["--check"] + project_flags, @output, @error)
+      status = compiler.run(["--check"] + project_flags, @output, @error)
+      return status unless status == 0 && workspace.kind.library? && workspace.tests?
+      compiler.run(["--check"] + test_flags, @output, @error)
     end
   end
 
@@ -159,7 +179,40 @@ module Zane::Commands
     end
   end
 
-  # `zane clean` (§2.5).
+  # `zane test [-- ARGS]` (§2.5): builds the library's test build for the
+  # host without optimizing, into `out/test/`, then runs it with *ARGS* and
+  # exits with its status. The test package is the program, and the library
+  # its dependency (spec packages.md §7.2).
+  class Test < ProjectCommand
+    @program_args = [] of String
+
+    def usage : String
+      "usage: zane test [-- ARGS]"
+    end
+
+    private def arguments(after : Array(String)) : Nil
+      @program_args = after
+    end
+
+    def run : Int32
+      ws = workspace
+      if ws.kind.application?
+        raise UserError.new("`#{ws.name}` is an application, which has no test package; run it with `zane run`")
+      end
+      unless ws.tests?
+        raise UserError.new("`#{ws.name}` has no test package: put a .zn file declaring `package #{Manifest::TEST_PACKAGE}` and a `main` in #{ws.test_dir}")
+      end
+      path = output_in("test", nil)
+      Dir.mkdir_p(path.parent)
+      links = test_graph.objects(Target::HOST, compiler).flat_map { |o| ["--link", o.to_s] }
+      status = compiler.run(["--build", path.to_s] + test_flags + links, @output, @error)
+      return status unless status == 0
+      Compiler.launch(path.to_s, @program_args,
+        input: Process::Redirect::Inherit, output: @output, error: @error)
+    end
+  end
+
+  # `zane clean` (§2.6).
   class Clean < ProjectCommand
     def usage : String
       "usage: zane clean"

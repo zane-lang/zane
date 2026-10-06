@@ -182,7 +182,7 @@ describe Zane::Commands::Init do
     end
   end
 
-  it "creates a library whose source file is named after it" do
+  it "creates a library whose source file is named after it, with a test package that imports it" do
     with_tmp do |tmp|
       init([(tmp / "geo").to_s, "--lib", "--name", "geometry", "--zane-version", "v0.0", "--no-git"])
       manifest = read_coda(tmp / "geo" / "zane.coda")
@@ -190,6 +190,17 @@ describe Zane::Commands::Init do
       manifest["zane-version"].should eq "v0.0"
       File.read(tmp / "geo" / "src" / "geometry.zn").should contain "package geometry;"
       File.exists?(tmp / "geo" / "src" / "main.zn").should be_false
+      test = File.read(tmp / "geo" / "test" / "main.zn")
+      test.should start_with "package test;\n\nimport geometry;\n"
+      test.should contain "check(geometry$double(Int(21)) == Int(42));"
+      test.should contain %(passed String("ok\\n");)
+    end
+  end
+
+  it "writes no test package for an application" do
+    with_tmp do |tmp|
+      init([(tmp / "app").to_s, "--app", "--zane-version", "v0.0", "--no-git"])
+      Dir.exists?(tmp / "app" / "test").should be_false
     end
   end
 

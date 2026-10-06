@@ -170,8 +170,8 @@ they always change the two files together
 | `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, URL and where its code comes from. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
 
 `update` and `dev` apply to a `test-deps` key as to a `deps` key. `add`, `update`
-and `dev` fetch the changed graph for the host before writing either file, as
-`add` does, so a change that leaves the project unable to build
+and `dev` fetch the changed graph for the host, `test-deps` included, before
+writing either file, as `add` does, so a change that leaves the project unable to build
 is refused and nothing is written. `remove`, `remap` and `unremap` write without
 fetching. `check`, `build`, `run` and `test` resolve and fetch the graph as §3.1 says,
 and warn about each URL in `remaps` that names no package of the graph
@@ -356,7 +356,7 @@ it describes.
 4. **Toolchains.** `toolchain install [tag]` is implemented; `toolchain use`
    remains to come.
 5. **Tests.** `test`, the `test-deps` block, `add --test`, `tree --test`, and
-   the test package `init` writes for a library (§2.5).
+   the test package `init` writes for a library (§2.5). Built.
 
 `zane` runs the first compiler it finds of: the one `ZANE_COMPILER` names, the
 toolchain installed for the project's `zane-version` (§4.1), and `zanec` on

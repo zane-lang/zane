@@ -148,6 +148,7 @@ private def zane(args : Array(String), dir : Path) : {Int32, String, String}
            when "fetch"   then Zane::Commands::Fetch.new(rest, output, error, dir).run
            when "build"   then Zane::Commands::Build.new(rest, output, error, dir).run
            when "check"   then Zane::Commands::Check.new(rest, output, error, dir).run
+           when "test"    then Zane::Commands::Test.new(rest, output, error, dir).run
            when "remove"  then Zane::Commands::Remove.new(rest, output, error, dir).run
            when "update"  then Zane::Commands::Update.new(rest, output, error, dir).run
            when "dev"     then Zane::Commands::Dev.new(rest, output, error, dir).run
@@ -523,6 +524,131 @@ describe Zane::Commands::Tree do
         └── math v1.0, https://example.com/math, from source (see above)
 
         TEXT
+    end
+  end
+end
+
+# Makes the registry's project a library with a test package.
+private def make_library(project : Path) : Nil
+  File.write(project / "zane.coda", File.read(project / "zane.coda").sub("kind application", "kind library"))
+  Dir.mkdir_p(project / "test")
+  File.write(project / "test" / "main.zn", "package test;\nimport app;\n")
+end
+
+private def test_rows(project : Path)
+  read_coda(project / "zane.coda")["test-deps"].as(Hash)["rows"]
+end
+
+describe "a library's test package" do
+  it "keeps test-deps out of the library's build and imports them into the test build" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      registry.publish("probe", "v3.0")
+      make_library(project)
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      status, output, _ = zane(["add", registry.url("probe"), "--test"], project)
+      status.should eq 0
+      output.should contain "Import it in test/ with: import probe"
+      deps_rows(project).as(Hash).keys.should eq ["math"]
+      test_rows(project).should eq({"probe" => {"version" => "v3.0", "from" => "release"}})
+      lock_rows(project).keys.should eq ["zane", "math", "probe"]
+
+      math, probe = registry.id("math", "v1.0"), registry.id("probe", "v3.0")
+      math_src, probe_src = entry("math", "v1.0") / "src" / "src", entry("probe", "v3.0") / "src" / "src"
+      File.delete(log)
+      zane(["check"], project)[0].should eq 0
+      File.read_lines(log).should eq [
+        "--check --kind library --package app=#{project / "src"} --package #{math}=#{math_src} --import app:math=#{math}",
+        "--check --kind application --package test=#{project / "test"} --package app=#{project / "src"} " \
+        "--package #{probe}=#{probe_src} --package #{math}=#{math_src} " \
+        "--import test:app=app --import test:math=#{math} --import test:probe=#{probe} --import app:math=#{math}",
+      ]
+
+      File.delete(log)
+      zane(["test"], project)[0].should eq 0
+      File.read_lines(log).last.should end_with(
+        "--import app:math=#{math} " \
+        "--link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"} " \
+        "--link #{entry("probe", "v3.0") / "build" / Zane::Target::HOST / "probe.o"}")
+
+      zane(["tree", "--test"], project)[1].should eq <<-TEXT
+        app (library)
+        ├── math v1.0, https://example.com/math, prebuilt
+        └── probe v3.0, https://example.com/probe, prebuilt (test)
+
+        TEXT
+      zane(["tree"], project)[1].should_not contain "probe"
+
+      registry.publish("probe", "v3.1")
+      zane(["update", "probe"], project)[0].should eq 0
+      test_rows(project).should eq({"probe" => {"version" => "v3.1", "from" => "release"}})
+      deps_rows(project).as(Hash).keys.should eq ["math"]
+
+      zane(["remove", "probe"], project)[0].should eq 0
+      test_rows(project).should eq({} of String => Hash(String, String))
+      lock_rows(project).keys.should eq ["zane", "math"]
+    end
+  end
+
+  it "refuses test-deps for an application, and the key `test`" do
+    with_registry do |registry, project|
+      registry.publish("probe", "v3.0")
+      expect_raises(Zane::UserError, "`app` is an application, which has no test package") do
+        zane(["add", registry.url("probe"), "--test"], project)
+      end
+      expect_raises(Zane::UserError, "`test` is the name of the test package") do
+        zane(["add", registry.url("probe"), "--as", "test"], project)
+      end
+    end
+  end
+
+  it "refuses an import of a test-deps key in src/, and a key named like the library" do
+    with_registry do |registry, project|
+      registry.publish("probe", "v3.0")
+      make_library(project)
+      zane(["add", registry.url("probe"), "--test"], project)[0].should eq 0
+      File.write(project / "src" / "main.zn", "package app;\nimport probe$;\n")
+      expect_raises(Zane::UserError, "src/main.zn:2 imports `probe`, which is in `test-deps`") do
+        zane(["check"], project)
+      end
+      File.write(project / "src" / "main.zn", "package app;\n")
+      zane(["add", registry.url("probe"), "--as", "app"], project)[0].should eq 0
+      expect_raises(Zane::UserError, "the key `app` is the library's own name") do
+        zane(["test"], project)
+      end
+    end
+  end
+end
+
+describe Zane::Manifest do
+  it "reads test-deps and holds them to the rules of dependencies.md §2.1" do
+    with_registry do |_, project|
+      base = File.read(project / "zane.coda").sub("kind application", "kind library")
+      lock = File.read(project / "zane-lock.coda")
+      write = ->(manifest : String, locked : String) {
+        File.write(project / "zane.coda", manifest)
+        File.write(project / "zane-lock.coda", locked)
+        nil
+      }
+      row = "    probe https://example.com/probe 0123456789abcdef\n"
+      with_probe = lock.sub(/\]\n\z/, "#{row}]\n")
+      tests = "\ntest-deps [\n    key version from\n    probe v1.0 release\n]\n"
+
+      write.call(base + tests, with_probe)
+      manifest = Zane::Manifest.load(project)
+      manifest.deps.should be_empty
+      manifest.test_deps.should eq [Zane::Dependency.new("probe", "v1.0", "release", true)]
+
+      write.call(base + tests, lock)
+      expect_raises(Zane::UserError, "zane-lock.coda has no row for `probe`") { Zane::Manifest.load(project) }
+      write.call(base.sub("]", "    probe v1.0 release\n]") + tests, with_probe)
+      expect_raises(Zane::UserError, "`probe` is in both `deps` and `test-deps`") { Zane::Manifest.load(project) }
+      write.call(base.sub("kind library", "kind application") + tests, with_probe)
+      expect_raises(Zane::UserError, "an application has no test package, so no `test-deps`") { Zane::Manifest.load(project) }
+      write.call(base.sub("name app", "name test"), lock)
+      expect_raises(Zane::UserError, "`test` is the name of a library's test package, and no project's") { Zane::Manifest.load(project) }
+      write.call(base + tests.sub("probe v1.0", "test v1.0"), lock.sub(/\]\n\z/, "    test https://example.com/probe 0123456789abcdef\n]\n"))
+      expect_raises(Zane::UserError, "`test` is the name of a library's test package, and is not a dependency key") { Zane::Manifest.load(project) }
     end
   end
 end

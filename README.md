@@ -61,7 +61,7 @@ archive's SHA-256 and its compiler commit before making it available.
 Toolchains live side by side in `~/.zane/toolchains/<version>/`, or under
 `ZANE_HOME`. Projects use the version their `zane-version` field pins;
 installing a newer compiler does not update that field. `zane init` uses the
-newest installed compiler, and `zane check`, `build` and `run` find it
+newest installed compiler, and `zane check`, `build`, `run` and `test` find it
 automatically. No extra `PATH` setup is needed for the compiler.
 
 The compiler release workflow currently provides **Linux x86_64** archives,
@@ -88,6 +88,16 @@ This also lets you test an unreleased compiler. Then create and check a project:
 zane init hello --yes
 cd hello
 zane check
+```
+
+A library has no program of its own to run. `zane init --lib` also writes a
+test package in `test/`, which imports the library the way any other project
+would, and `zane test` builds and runs it:
+
+```sh
+zane init mathLib --lib --yes
+cd mathLib
+zane test
 ```
 
 `init` pins an installed compiler toolchain or a published compiler tag.

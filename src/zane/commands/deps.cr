@@ -49,11 +49,11 @@ module Zane::Commands
       @workspace ||= Workspace.find(@dir)
     end
 
-    # Fetches the whole graph of *manifest* for the host, so that a change
-    # which leaves the project unable to build is refused before either file
-    # is written.
+    # Fetches the whole graph of *manifest* for the host, its `test-deps`
+    # included, so that a change which leaves the project or its tests unable
+    # to build is refused before either file is written.
     private def fetch(manifest : Manifest) : Graph
-      graph = Graph.new(Workspace.new(manifest))
+      graph = Graph.new(Workspace.new(manifest), test: true)
       graph.objects(Target::HOST, Compiler.locate(workspace.zane_version, @toolchains))
       Commands.report(graph, @error)
       graph
@@ -66,7 +66,7 @@ module Zane::Commands
     end
 
     private def known_keys : String
-      keys = workspace.manifest.deps.map(&.key)
+      keys = workspace.manifest.all_deps.map(&.key)
       keys.empty? ? "; it has no dependencies" : "; its dependencies are #{keys.join(", ")}"
     end
 
@@ -94,14 +94,16 @@ module Zane::Commands
     end
   end
 
-  # `zane add <url> [tag] [--as key] [--from-source]` (§3): pins a library,
-  # fetches it, and records it in both of the project's files.
+  # `zane add <url> [tag] [--as key] [--from-source] [--test]` (§3): pins a
+  # library, fetches it, and records it in both of the project's files, in
+  # `test-deps` when *--test* says only the test package imports it.
   class Add < EditCommand
     @key : String? = nil
     @from_source = false
+    @test = false
 
     def usage : String
-      "usage: zane add <url> [tag] [--as KEY] [--from-source]"
+      "usage: zane add <url> [tag] [--as KEY] [--from-source] [--test]"
     end
 
     def arity : Range(Int32, Int32)
@@ -111,26 +113,30 @@ module Zane::Commands
     private def options(p : OptionParser) : Nil
       p.on("--as KEY", "The key to import the library by, instead of the last part of its URL") { |v| @key = v }
       p.on("--from-source", "Compile the library here rather than link its prebuilt objects") { @from_source = true }
+      p.on("--test", "Record it in `test-deps`, for the test package alone") { @test = true }
     end
 
     def run : Int32
       ws = workspace
+      if @test && ws.kind.application?
+        raise UserError.new("`#{ws.name}` is an application, which has no test package and so no `test-deps`")
+      end
       url = PackageUrl.parse(@args[0])
       key = choose_key(ws, url)
       tags = Git.tags(url.url)
       tag, commit = pin(tags, url, @args[1]? || newest(tags, url))
 
-      dep = Dependency.new(key, tag, @from_source ? "source" : "release")
+      dep = Dependency.new(key, tag, @from_source ? "source" : "release", @test)
       # The whole graph is fetched for the host before anything is written,
       # so a library that cannot be used is never recorded.
       fetch(ws.manifest.with_dependency(dep, Resolution.new(url.url, commit)))
       ProjectFiles.change(ws.root,
-        ->(doc : Coda::Doc) { ProjectFiles.deps(doc)[key] = Coda::Row.new.insert("version", tag).insert("from", dep.from); nil },
+        ->(doc : Coda::Doc) { ProjectFiles.deps(doc, @test)[key] = Coda::Row.new.insert("version", tag).insert("from", dep.from); nil },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc)[key] = Coda::Row.new.insert("url", url.url).insert("commit", commit); nil })
 
       how = @from_source ? "compiled from source" : "prebuilt for #{Target::HOST}"
-      @output.puts "Added #{key} #{tag} (#{url}, commit #{commit[0, 12]}), #{how}."
-      @output.puts "Import it with: import #{key}"
+      @output.puts "Added #{key} #{tag} (#{url}, commit #{commit[0, 12]}), #{how}#{@test ? ", for the tests" : ""}."
+      @output.puts "Import it#{@test ? " in test/" : ""} with: import #{key}"
       0
     end
 
@@ -141,6 +147,9 @@ module Zane::Commands
       end
       if key == Manifest::COMPILER_KEY
         raise UserError.new("`#{key}` is reserved for the compiler; choose another key with --as")
+      end
+      if key == Manifest::TEST_PACKAGE
+        raise UserError.new("`#{key}` is the name of the test package; choose another key with --as")
       end
       if ws.manifest.dependency?(key)
         raise UserError.new("the project already depends on `#{key}`; change its version with `zane update`")
@@ -162,31 +171,16 @@ module Zane::Commands
 
     def run : Int32
       ws = workspace
-      key = dependency(@args[0]).key
+      dep = dependency(@args[0])
+      key = dep.key
       ProjectFiles.change(ws.root,
-        ->(doc : Coda::Doc) { ProjectFiles.deps(doc).delete(key); nil },
+        ->(doc : Coda::Doc) { ProjectFiles.deps(doc, dep.test).delete(key); nil },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc).delete(key); nil })
       @output.puts "Removed #{key}."
-      importers(ws, key).each do |file, line|
+      (ws.importers(ws.source_dir, key) + ws.importers(ws.test_dir, key)).each do |file, line|
         @error.puts "zane: warning: #{file}:#{line} still imports #{key}"
       end
       0
-    end
-
-    # Each line of the project's sources that imports *key*, in any of the
-    # import forms (spec packages.md §3.3).
-    private def importers(ws : Workspace, key : String) : Array({String, Int32})
-      import = /^\s*import\s+#{Regex.escape(key)}(?![A-Za-z0-9_])/
-      found = [] of {String, Int32}
-      return found unless Dir.exists?(ws.source_dir)
-      Dir.children(ws.source_dir).sort!.each do |name|
-        path = ws.source_dir / name
-        next unless name.ends_with?(".zn") && File.file?(path)
-        File.read_lines(path).each_with_index(1) do |line, number|
-          found << {path.relative_to(ws.root).to_posix.to_s, number} if import.matches?(line)
-        end
-      end
-      found
     end
   end
 
@@ -209,7 +203,7 @@ module Zane::Commands
 
     def run : Int32
       ws = workspace
-      deps = @args.empty? ? ws.manifest.deps : [dependency(@args[0])]
+      deps = @args.empty? ? ws.manifest.all_deps : [dependency(@args[0])]
       manifest = ws.manifest
       updates = [] of {Dependency, Dependency, Resolution}
       deps.each do |dep|
@@ -235,8 +229,7 @@ module Zane::Commands
       fetch(manifest)
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) {
-          table = ProjectFiles.deps(doc)
-          updates.each { |_, d, _| table[d.key]["version"] = d.version }
+          updates.each { |_, d, _| ProjectFiles.deps(doc, d.test)[d.key]["version"] = d.version }
           nil
         },
         ->(doc : Coda::Doc) {
@@ -284,7 +277,7 @@ module Zane::Commands
       same_package(dep, Path[from].expand(ws.root)) unless off
       updated = dep.copy_with(from: from)
       fetch(ws.manifest.with_dependency(updated, ws.manifest.resolutions[dep.key]))
-      ProjectFiles.change(ws.root, ->(doc : Coda::Doc) { ProjectFiles.deps(doc)[dep.key]["from"] = from; nil })
+      ProjectFiles.change(ws.root, ->(doc : Coda::Doc) { ProjectFiles.deps(doc, dep.test)[dep.key]["from"] = from; nil })
       if off
         @output.puts "#{dep.key} now links its release, #{dep.version}."
       else
@@ -347,7 +340,7 @@ module Zane::Commands
 
       # The graph is read first, so a project that cannot resolve is left as
       # it was.
-      known = !@on || Graph.new(ws).package?(url)
+      known = !@on || Graph.new(ws, test: true).package?(url)
       ProjectFiles.change(ws.root, ->(doc : Coda::Doc) {
         if index = listed
           list = doc.root["remaps"].as_array
@@ -380,29 +373,41 @@ module Zane::Commands
       p.on("--target TRIPLE", "A target to fetch for, instead of the host; may be repeated") { |v| @targets << v }
     end
 
+    # The project's `test-deps` are fetched as well, so its tests too can
+    # then be built offline.
     def run : Int32
       targets = @targets.empty? ? [Target::HOST] : @targets
       targets.each do |target|
-        graph.objects(target, compiler)
-        count = graph.linked.size
+        test_graph.objects(target, compiler)
+        count = test_graph.linked.size
         @output.puts "Fetched #{count} #{count == 1 ? "package" : "packages"} for #{target}."
       end
       0
     end
   end
 
-  # `zane tree` (§3): the resolved graph, each package under what depends on
-  # it, with its version and where its code comes from, then the versions
-  # linked side by side and those remapping collapsed.
+  # `zane tree [--test]` (§3): the resolved graph, each package under what
+  # depends on it, with its version and where its code comes from, then the
+  # versions linked side by side and those remapping collapsed. With
+  # *--test*, the graph of the test build, its `test-deps` marked.
   class Tree < ProjectCommand
+    @test = false
+
     def usage : String
-      "usage: zane tree"
+      "usage: zane tree [--test]"
+    end
+
+    private def options(p : OptionParser) : Nil
+      p.on("--test", "Show the graph of the test build, with the test-deps") { @test = true }
     end
 
     def run : Int32
       ws = workspace
+      graph = @test ? test_graph : self.graph
       @output.puts "#{ws.name} (#{ws.kind})"
-      print(graph.direct, "", Set(String).new)
+      edges = graph.direct + graph.test_direct
+      tests = graph.test_direct.map(&.key).to_set
+      print(graph, edges, "", Set(String).new, tests)
       graph.linked.group_by(&.url.normalized).each_value do |versions|
         next if versions.size < 2
         @output.puts "Side by side: #{versions[0].url} #{versions.map(&.tag).join(", ")}"
@@ -415,7 +420,8 @@ module Zane::Commands
       0
     end
 
-    private def print(edges : Array(Graph::Edge), indent : String, shown : Set(String)) : Nil
+    private def print(graph : Graph, edges : Array(Graph::Edge), indent : String, shown : Set(String),
+                      tests = Set(String).new) : Nil
       edges.each_with_index do |edge, i|
         last = i == edges.size - 1
         package = edge.package
@@ -423,13 +429,14 @@ module Zane::Commands
         resolved = chosen || package
         again = shown.includes?(resolved.node)
         notes = [] of String
+        notes << "test" if tests.includes?(edge.key)
         notes << "remapped onto #{resolved.tag}" if chosen
         notes << "see above" if again
         note = notes.empty? ? "" : " (#{notes.join(", ")})"
         @output.puts "#{indent}#{last ? "└── " : "├── "}#{line(edge.key, package)}#{note}"
         next if again
         shown << resolved.node
-        print(graph.dependencies(resolved), indent + (last ? "    " : "│   "), shown)
+        print(graph, graph.dependencies(resolved), indent + (last ? "    " : "│   "), shown)
       end
     end
 
