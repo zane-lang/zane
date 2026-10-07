@@ -343,7 +343,7 @@ zane-lang/compiler#147, `--optimize` since #148, `--object` since #150,
 `--link` since #151, `--rewrite` since #152 for ELF and #153 for Mach-O and
 COFF, stamped `--package` names, `--import` and `--remap` since #156, and
 package paths, `_`-prefixed names, rootless library builds and imports
-through keys alone since the compiler's layout change.
+through keys alone since #188.
 
 `zane` passes each build its packages in this order: the first package, the
 project's library packages, then every version its graph links, each with its
