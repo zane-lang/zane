@@ -73,6 +73,7 @@ module Zane::Commands
       pattern = choose_version_pattern(ask)
       git = choose_git(root, ask)
       release = CompilerRelease.resolve(@zane_version, @compiler_url, @toolchains)
+      check_library_compiler(release) if start.library?
       if git && !Process.find_executable("git")
         raise UserError.new("git is not installed; run again with --no-git")
       end
@@ -175,6 +176,15 @@ module Zane::Commands
       false
     end
 
+    # v0.3 introduced I64 and @operators$, which the library and its test use.
+    private def check_library_compiler(release : CompilerRelease) : Nil
+      version = CompilerRelease::TAG.match(release.tag).not_nil!
+      return if version[1].to_i > 0 || version[2].to_i >= 3
+      raise UserError.new(
+        "the library template requires compiler v0.3 or newer; selected #{release.tag}. " \
+        "Install a newer toolchain with `zane toolchain install`, or select one with --zane-version v0.3; nothing was written")
+    end
+
     private def write(root : Path, name : String, start : Start, pattern : String, release : CompilerRelease) : Nil
       Dir.mkdir_p(root)
 
@@ -228,10 +238,8 @@ module Zane::Commands
       <<-ZANE
         package #{name};
 
-        alias Int = @primitives$Int
-
         /// Every declaration is public unless its name starts with `_`.
-        Int double(n Int) => n + n
+        @primitives$I64 double(n @primitives$I64) => @operators$add(n, n)
 
         ZANE
     end
@@ -244,7 +252,7 @@ module Zane::Commands
 
         import #{name};
 
-        alias Int = @primitives$Int
+        alias I64 = @primitives$I64
         alias Bool = @primitives$Bool
         alias Unit = @primitives$Unit
         alias String = @primitives$String
@@ -255,14 +263,14 @@ module Zane::Commands
         \t@controlflow$branch(ok, {
         \t\t@program$console!print(passed);
         \t});
-        \t@controlflow$branch(~ok, {
+        \t@controlflow$branch(@operators$not(ok), {
         \t\t@program$console!print(failed);
         \t});
         \treturn Unit();
         }
 
         Unit main() {
-        \tcheck(#{name}$double(Int(21)) == Int(42));
+        \tcheck(@operators$equal(#{name}$double(I64(21)), I64(42)));
         \treturn Unit();
         }
 
