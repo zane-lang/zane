@@ -263,7 +263,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
 | `zane toolchain use <tag>` | Changes `zane-version` and the `zane` lock row together. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
-| `zane inspect cst\|sst\|decls\|tst\|cgt\|ll` | The compiler's debug views, run on the project. |
+| `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed: the one program, or the one named when there are several. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
 What an application's release produces is not designed yet.
 
@@ -369,6 +369,8 @@ subpackage it tests
    subpackages, programs per directory of `bin/`, `test`, the `test-deps`
    block, `add --test`, `tree --test`, and the packages `init` writes (§2.5).
    Built.
+6. **Inspection.** `inspect` and its six views, with `--optimize` and
+   `--target` for the views of a build (§4). Built.
 
 `zane` runs the first compiler it finds of: the one `ZANE_COMPILER` names, the
 toolchain installed for the project's `zane-version` (§4.1), and `zanec` on
