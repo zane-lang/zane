@@ -187,11 +187,15 @@ describe Zane::Commands::Init do
       output.should contain "with the library package lib/geometry/ and its test package test/geometry/"
       manifest = read_coda(tmp / "geo" / "zane.coda")
       manifest["zane-version"].should eq "v0.0"
-      File.read(tmp / "geo" / "lib" / "geometry" / "geometry.zn").should contain "package geometry;"
+      library = File.read(tmp / "geo" / "lib" / "geometry" / "geometry.zn")
+      library.should contain "package geometry;"
+      library.should contain "@primitives$I64 double(n @primitives$I64) => @operators$add(n, n)"
       Dir.exists?(tmp / "geo" / "bin").should be_false
       test = File.read(tmp / "geo" / "test" / "geometry" / "main.zn")
       test.should start_with "package test;\n\nimport geometry;\n"
-      test.should contain "check(geometry$double(Int(21)) == Int(42));"
+      test.should contain "alias I64 = @primitives$I64"
+      test.should contain "check(@operators$equal(geometry$double(I64(21)), I64(42)));"
+      test.should contain "@controlflow$branch(@operators$not(ok), {"
       test.should contain %(passed String("ok\\n");)
     end
   end

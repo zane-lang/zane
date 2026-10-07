@@ -228,10 +228,8 @@ module Zane::Commands
       <<-ZANE
         package #{name};
 
-        alias Int = @primitives$Int
-
         /// Every declaration is public unless its name starts with `_`.
-        Int double(n Int) => n + n
+        @primitives$I64 double(n @primitives$I64) => @operators$add(n, n)
 
         ZANE
     end
@@ -244,7 +242,7 @@ module Zane::Commands
 
         import #{name};
 
-        alias Int = @primitives$Int
+        alias I64 = @primitives$I64
         alias Bool = @primitives$Bool
         alias Unit = @primitives$Unit
         alias String = @primitives$String
@@ -255,14 +253,14 @@ module Zane::Commands
         \t@controlflow$branch(ok, {
         \t\t@program$console!print(passed);
         \t});
-        \t@controlflow$branch(~ok, {
+        \t@controlflow$branch(@operators$not(ok), {
         \t\t@program$console!print(failed);
         \t});
         \treturn Unit();
         }
 
         Unit main() {
-        \tcheck(#{name}$double(Int(21)) == Int(42));
+        \tcheck(@operators$equal(#{name}$double(I64(21)), I64(42)));
         \treturn Unit();
         }
 
