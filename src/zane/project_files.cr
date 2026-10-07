@@ -37,10 +37,12 @@ module Zane
       File.delete?(backup) if backup
     end
 
-    # The `deps` table of *doc*, made when it has none.
-    def self.deps(doc : Coda::Doc) : Coda::KeyedTable
-      doc.root["deps"] = Coda::KeyedTable.new(["version", "from"]) unless doc.root.has_key?("deps")
-      doc.root["deps"].as_keyed_table
+    # The `deps` table of *doc*, or its `test-deps` table when *test*, made
+    # when it has none.
+    def self.deps(doc : Coda::Doc, test : Bool = false) : Coda::KeyedTable
+      block = test ? Manifest::TEST_DEPS : Manifest::DEPS
+      doc.root[block] = Coda::KeyedTable.new(["version", "from"]) unless doc.root.has_key?(block)
+      doc.root[block].as_keyed_table
     end
 
     def self.resolutions(doc : Coda::Doc) : Coda::KeyedTable

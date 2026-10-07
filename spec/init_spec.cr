@@ -128,9 +128,7 @@ describe Zane::Commands::Init do
       root = tmp / "my-app"
 
       manifest = read_coda(root / "zane.coda")
-      manifest.keys.should eq ["name", "kind", "zane-version", "version-pattern", "deps"]
-      manifest["name"].should eq "myApp"
-      manifest["kind"].should eq "application"
+      manifest.keys.should eq ["zane-version", "version-pattern", "deps"]
       manifest["zane-version"].should eq "v0.1"
       manifest["version-pattern"].should eq "v*.+.++"
       manifest["deps"].should eq({"columns" => ["version", "from"], "rows" => {} of String => Hash(String, String)})
@@ -138,7 +136,8 @@ describe Zane::Commands::Init do
       lock = read_coda(root / "zane-lock.coda")
       lock["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {"zane" => {"url" => COMPILER, "commit" => V01}}})
 
-      File.read(root / "src" / "main.zn").should start_with "package myApp;\n"
+      File.read(root / "bin" / "myApp" / "main.zn").should start_with "package myApp;\n"
+      Dir.exists?(root / "test").should be_false
       File.read(root / ".gitignore").should eq "out/\n"
       File.exists?(root / ".git").should be_false
     end
@@ -182,14 +181,18 @@ describe Zane::Commands::Init do
     end
   end
 
-  it "creates a library whose source file is named after it" do
+  it "creates a library package with a test package that imports it" do
     with_tmp do |tmp|
-      init([(tmp / "geo").to_s, "--lib", "--name", "geometry", "--zane-version", "v0.0", "--no-git"])
+      output = init([(tmp / "geo").to_s, "--lib", "--name", "geometry", "--zane-version", "v0.0", "--no-git"])
+      output.should contain "with the library package lib/geometry/ and its test package test/geometry/"
       manifest = read_coda(tmp / "geo" / "zane.coda")
-      manifest["kind"].should eq "library"
       manifest["zane-version"].should eq "v0.0"
-      File.read(tmp / "geo" / "src" / "geometry.zn").should contain "package geometry;"
-      File.exists?(tmp / "geo" / "src" / "main.zn").should be_false
+      File.read(tmp / "geo" / "lib" / "geometry" / "geometry.zn").should contain "package geometry;"
+      Dir.exists?(tmp / "geo" / "bin").should be_false
+      test = File.read(tmp / "geo" / "test" / "geometry" / "main.zn")
+      test.should start_with "package test;\n\nimport geometry;\n"
+      test.should contain "check(geometry$double(Int(21)) == Int(42));"
+      test.should contain %(passed String("ok\\n");)
     end
   end
 
@@ -236,13 +239,12 @@ describe Zane::Commands::Init do
     with_tmp do |tmp|
       answers = "y\nBad Name\ntools\nlib\nv*.+.+\nv*.+\nn\n"
       output = init([(tmp / "my-tools").to_s], answers, interactive: true)
-      output.should contain "Project name [myTools]: "
+      output.should contain "Package name [myTools]: "
       output.should contain "`Bad Name` is not a package name"
       output.should contain "`v*.+.+` is not a version pattern: `+` and `+` share a priority level"
       manifest = read_coda(tmp / "my-tools" / "zane.coda")
-      manifest["name"].should eq "tools"
-      manifest["kind"].should eq "library"
       manifest["version-pattern"].should eq "v*.+"
+      File.exists?(tmp / "my-tools" / "lib" / "tools" / "tools.zn").should be_true
       File.exists?(tmp / "my-tools" / ".git").should be_false
     end
   end
@@ -259,7 +261,7 @@ describe Zane::Commands::Init do
   it "asks nothing for a flag it was given" do
     with_tmp do |tmp|
       output = init([(tmp / "x").to_s, "--name", "x", "--app", "--version-pattern", "v*.+", "--no-git"], "\n", interactive: true)
-      output.should_not contain "Project name"
+      output.should_not contain "Package name"
       output.should_not contain "Library or application"
       output.should_not contain "Version pattern"
     end

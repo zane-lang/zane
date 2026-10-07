@@ -3,6 +3,7 @@ require "./cache"
 require "./compiler"
 require "./errors"
 require "./home"
+require "./layout"
 require "./manifest"
 require "./package_url"
 require "./remap"
@@ -24,25 +25,21 @@ module Zane
       Path
     end
 
-    # One version of one package. *key* is the key it was first reached by,
-    # and *entry* its place in the cache, which a path dependency has none
-    # of.
-    record Package, key : String, name : String, url : PackageUrl, tag : String, commit : String,
-      from : From, manifest : Manifest, entry : CacheEntry? do
-      # The directory of its sources, which the compiler reads (§12).
-      def sources : Path
-        manifest.root / "src"
-      end
-
-      # The name its symbols carry in place of the placeholder (§6.1).
+    # One version of one package, a project whose library packages are
+    # linked. *key* is the key it was first reached by, and *entry* its
+    # place in the cache, which a path dependency has none of.
+    record Package, key : String, url : PackageUrl, tag : String, commit : String,
+      from : From, manifest : Manifest, entry : CacheEntry?, layout : Layout do
+      # What its symbols carry in place of the placeholder (§6.1).
       def stamp : String
         url.stamp(tag)
       end
 
-      # What the compiler knows it by: its stamp and name (compiler
-      # docs/design/separate-compilation.md C10).
-      def id : String
-        "#{stamp}#{name}"
+      # What the compiler knows one of its library packages by: the stamp,
+      # then the package's path (compiler docs/design/separate-compilation.md
+      # C10).
+      def id(library : Layout::Lib) : String
+        "#{stamp}#{library.path}"
       end
 
       # The version of the package it is: its URL and tag.
@@ -58,6 +55,10 @@ module Zane
     def self.node(url : PackageUrl, tag : String) : String
       "#{url.normalized} #{tag}"
     end
+
+    # Where the project's `test-deps` edges are kept, beside its own
+    # dependencies under "".
+    TEST_EDGES = "#test"
 
     # Every version the manifests pin, each after every package it depends
     # on.
@@ -83,13 +84,19 @@ module Zane
     # Each version remapping displaced, and the version chosen in its place.
     @chosen = {} of String => Package
 
-    # Reads the graph of *workspace*. *packages* is the cache.
-    def initialize(@workspace : Workspace, @packages_dir : Path = Home.packages)
+    # Reads the graph of *workspace*, whose packages *layout* lays out.
+    # *packages* is the cache. When *test*, it is the graph of a test build,
+    # which the project's `test-deps` join (spec dependencies.md §13); a
+    # dependency's own `test-deps` never do.
+    def initialize(@workspace : Workspace, @layout : Layout, @packages_dir : Path = Home.packages, @test : Bool = false)
       manifest = @workspace.manifest
-      manifest.deps.each do |dep|
+      top = @test ? manifest.all_deps : manifest.deps
+      top.each do |dep|
         @top[Graph.node(PackageUrl.parse(manifest.resolutions[dep.key].url), dep.version)] = dep
       end
-      visit(manifest, "", [] of String)
+      visit(manifest, "", [] of String, manifest.deps)
+      visit(manifest, TEST_EDGES, [] of String, manifest.test_deps) if @test
+      check_names
       @stale_remaps = manifest.remaps.reject do |url|
         normalized = PackageUrl.parse(url).normalized
         @packages.any? { |p| p.url.normalized == normalized }
@@ -100,6 +107,11 @@ module Zane
     # The dependencies the project's manifest pins, in its order.
     def direct : Array(Edge)
       @edges[""]? || [] of Edge
+    end
+
+    # The project's `test-deps`, in its order, in the graph of a test build.
+    def test_direct : Array(Edge)
+      @edges[TEST_EDGES]? || [] of Edge
     end
 
     # The dependencies *package*'s manifest pins, in its order.
@@ -128,7 +140,7 @@ module Zane
     def linked : Array(Package)
       @linked ||= begin
         order = [] of Package
-        link(direct, order, Set(String).new)
+        link(direct + test_direct, order, Set(String).new)
         order
       end
     end
@@ -145,9 +157,10 @@ module Zane
 
     @linked : Array(Package)?
 
-    private def visit(manifest : Manifest, parent : String, chain : Array(String)) : Nil
+    private def visit(manifest : Manifest, parent : String, chain : Array(String),
+                      deps : Array(Dependency) = manifest.deps) : Nil
       edges = @edges[parent] = [] of Edge
-      manifest.deps.each do |dep|
+      deps.each do |dep|
         resolution = manifest.resolutions[dep.key]
         url = PackageUrl.parse(resolution.url)
         if chain.includes?(url.normalized)
@@ -192,11 +205,12 @@ module Zane
           raise UserError.new("`#{dep.key}` comes from #{dep.from}, which holds no #{Manifest::FILE}")
         end
         manifest = Manifest.load(dir)
-        return Package.new(dep.key, manifest.name, url, dep.version, resolution.commit, from, manifest, nil)
+        return Package.new(dep.key, url, dep.version, resolution.commit, from, manifest, nil, Layout.new(dir))
       end
       entry = CacheEntry.new(url, dep.version, @packages_dir)
-      manifest = Manifest.load(entry.source(resolution.commit))
-      Package.new(dep.key, manifest.name, url, dep.version, resolution.commit, from, manifest, entry)
+      source = entry.source(resolution.commit)
+      manifest = Manifest.load(source)
+      Package.new(dep.key, url, dep.version, resolution.commit, from, manifest, entry, Layout.new(source))
     rescue error : UserError
       raise error if error.message.try(&.starts_with?("security error"))
       raise UserError.new("#{dep.key} (#{resolution.url} #{dep.version}, required by #{parent.root}): #{error.message}")
@@ -204,8 +218,8 @@ module Zane
 
     # The rules a package must keep to be part of the graph.
     private def check(package : Package) : Nil
-      if package.manifest.kind.application?
-        raise UserError.new("`#{package.key}` (#{package.url}) is an application, and only a library can be a dependency")
+      if package.layout.public_libs.empty?
+        raise UserError.new("`#{package.key}` (#{package.url}) has no public library package, so a project has nothing to import from it")
       end
       hash = package.url.identity_hash
       if (other = @hashes[hash]?) && other != package.url.normalized
@@ -232,23 +246,73 @@ module Zane
       end
     end
 
-    # The compiler's flags for the packages: `--package` for each version
-    # linked, and `--import` for the keys of the project and of each of
-    # them, after the project's own `--package`. A key that named a displaced
-    # version names its chosen one.
+    # Every name a package of one project imports must name one package
+    # (dependencies.md §8): its own top-level library and program packages,
+    # and the public library packages of its dependencies, and apart from
+    # those, those of its `test-deps`. Each project of the graph is held to
+    # it, the project itself first.
+    private def check_names : Nil
+      own = @layout.top_libs.map { |l| {l.name, "lib/#{l.name}/"} } +
+            @layout.programs.map { |p| {p.name, "bin/#{p.name}/"} }
+      distinct(own, direct, "the project reaches")
+      distinct(own + publics(direct), test_direct, "the project's tests reach") if @test
+      @packages.each do |p|
+        distinct(p.layout.top_libs.map { |l| {l.name, "lib/#{l.name}/ of #{p.url}"} }, dependencies(p), "#{p.url} reaches")
+      end
+    end
+
+    private def distinct(names : Array({String, String}), edges : Array(Edge), whose : String) : Nil
+      seen = {} of String => String
+      (names + publics(edges)).each do |name, where|
+        if other = seen[name]?
+          raise UserError.new("#{whose} two packages named `#{name}`: #{other} and #{where}; " \
+                              "the packages a project imports have distinct names")
+        end
+        seen[name] = where
+      end
+    end
+
+    private def publics(edges : Array(Edge)) : Array({String, String})
+      edges.flat_map do |e|
+        e.package.layout.public_libs.map { |l| {l.name, "`#{l.name}` of the dependency `#{e.key}` (#{e.package.url})"} }
+      end
+    end
+
+    # The compiler's flags for the packages the project depends on: for each
+    # version linked, `--package` for each of its library packages, and
+    # `--import` for the keys each may import, among its own packages and
+    # of its dependencies' public ones (packages.md §4.3). A key that named a
+    # displaced version names its chosen one.
     def package_flags : Array(String)
       flags = [] of String
-      linked.reverse_each { |p| flags.push("--package", "#{p.id}=#{p.sources}") }
-      flags.concat(imports(@workspace.name, direct, remapped: true))
-      linked.reverse_each { |p| flags.concat(imports(p.id, dependencies(p), remapped: true)) }
+      linked.reverse_each do |p|
+        p.layout.libs.each { |l| flags.push("--package", "#{p.id(l)}=#{l.dir}") }
+      end
+      linked.reverse_each { |p| flags.concat(project_imports(p, dependencies(p), remapped: true)) }
       flags
     end
 
-    private def imports(from : String, edges : Array(Edge), remapped : Bool) : Array(String)
+    # The keys of *package*'s library packages: those of its own project
+    # each may import, and the public ones of *edges*.
+    private def project_imports(package : Package, edges : Array(Edge), remapped : Bool) : Array(String)
+      package.layout.libs.flat_map do |l|
+        own = package.layout.keys(l).map { |key, target| {key, package.id(target)} }
+        keyed(package.id(l), own + public_keys(edges, remapped))
+      end
+    end
+
+    # Each public library package of *edges*' packages, by the key it is
+    # imported by, its name, and what the compiler knows it by.
+    def public_keys(edges : Array(Edge), remapped : Bool = true) : Array({String, String})
       edges.flat_map do |e|
         target = remapped ? resolved(e.package) : e.package
-        ["--import", "#{from}:#{e.key}=#{target.id}"]
+        target.layout.public_libs.map { |l| {l.name, target.id(l)} }
       end
+    end
+
+    # `--import` flags giving the package *from* each of *keys*.
+    def keyed(from : String, keys : Array({String, String})) : Array(String)
+      keys.flat_map { |key, target| ["--import", "#{from}:#{key}=#{target}"] }
     end
 
     # The objects for *target* that a program links: each release's
@@ -265,7 +329,7 @@ module Zane
         in .source?
           [entry.not_nil!.compiled(p.commit, target, @workspace.toolchain) { |dest| compile(p, target, compiler, dest) }]
         in .path?
-          dest = @workspace.out_dir / "deps" / target / p.url.identity_hash / p.tag / "#{p.name}.o"
+          dest = @workspace.out_dir / "deps" / target / p.url.identity_hash / p.tag / "package.o"
           Dir.mkdir_p(dest.parent)
           compile(p, target, compiler, dest)
           [dest]
@@ -274,16 +338,18 @@ module Zane
       @chosen.empty? ? objects : remapped(objects, target, compiler)
     end
 
-    # Compiles *package* on its own into the object *dest*, named with its
-    # stamp, against the versions its own manifest pins (compiler
-    # docs/design/separate-compilation.md C6).
+    # Compiles *package*'s library packages on their own into the object
+    # *dest*, named with its stamp, against the versions its own manifest
+    # pins (compiler docs/design/separate-compilation.md C1, C6).
     private def compile(package : Package, target : String, compiler : Compiler, dest : Path) : Nil
       closure = [] of Package
       gather(package, closure)
       args = ["--kind", "library", "--object", dest.to_s]
       args.push("--target", target) unless target == Target::HOST
-      ([package] + closure).each { |p| args.push("--package", "#{p.id}=#{p.sources}") }
-      ([package] + closure).each { |p| args.concat(imports(p.id, dependencies(p), remapped: false)) }
+      ([package] + closure).each do |p|
+        p.layout.libs.each { |l| args.push("--package", "#{p.id(l)}=#{l.dir}") }
+      end
+      ([package] + closure).each { |p| args.concat(project_imports(p, dependencies(p), remapped: false)) }
       error = IO::Memory.new
       unless compiler.run(args, error, error) == 0
         raise UserError.new("the compiler could not build #{package.key} #{package.tag} (#{package.url}):\n#{error.to_s.strip}")

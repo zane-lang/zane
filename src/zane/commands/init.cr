@@ -8,6 +8,13 @@ require "../project"
 module Zane::Commands
   # `zane init [dir]`: creates a project (docs/design/cli.md §2.1).
   class Init
+    # What the project starts with: a library package with a test package
+    # for it, or a program package (spec packages.md §2.1).
+    enum Start
+      Library
+      Program
+    end
+
     # What a newly created repository holds, which may already be in the
     # target directory.
     ALLOWED = [/\A\.git\z/, /\A\.github\z/, /\AREADME/, /\ALICENSE/, /\ACOPYING/, /\A\.gitignore\z/, /\A\.gitattributes\z/]
@@ -19,7 +26,7 @@ module Zane::Commands
 
     @dir : String = "."
     @name : String? = nil
-    @kind : Project::Kind? = nil
+    @start : Start? = nil
     @version_pattern : String? = nil
     @zane_version : String? = nil
     @git = true
@@ -37,9 +44,9 @@ module Zane::Commands
       dirs = [] of String
       OptionParser.parse(args.dup) do |p|
         p.banner = USAGE
-        p.on("--name NAME", "The package name") { |v| @name = v }
-        p.on("--lib", "Create a library") { @kind = Project::Kind::Library }
-        p.on("--app", "Create an application") { @kind = Project::Kind::Application }
+        p.on("--name NAME", "The name of the first package") { |v| @name = v }
+        p.on("--lib", "Start with a library package and a test package for it") { @start = Start::Library }
+        p.on("--app", "Start with a program package") { @start = Start::Program }
         p.on("--version-pattern PATTERN", "Which of the package's versions are interchangeable") { |v| @version_pattern = v }
         p.on("--zane-version TAG", "The compiler release to pin, instead of the newest installed or published") { |v| @zane_version = v }
         p.on("--no-git", "Do not create a Git repository") { @git = false }
@@ -62,7 +69,7 @@ module Zane::Commands
       end
 
       name = choose_name(root, ask)
-      kind = choose_kind(ask)
+      start = choose_start(ask)
       pattern = choose_version_pattern(ask)
       git = choose_git(root, ask)
       release = CompilerRelease.resolve(@zane_version, @compiler_url, @toolchains)
@@ -73,7 +80,7 @@ module Zane::Commands
       # Checked again, since the directory may have changed while the
       # questions were answered.
       check_target(root)
-      write(root, name, kind, pattern, release)
+      write(root, name, start, pattern, release)
       init_git(root) if git
 
       which = if @zane_version
@@ -83,7 +90,8 @@ module Zane::Commands
               else
                 ", the newest release"
               end
-      @output.puts "Created #{kind} `#{name}` in #{root}, built by the compiler #{release.tag}#{which}."
+      what = start.library? ? "the library package lib/#{name}/ and its test package test/#{name}/" : "the program bin/#{name}/"
+      @output.puts "Created a project in #{root} with #{what}, built by the compiler #{release.tag}#{which}."
     end
 
     # The directory must hold nothing but what a new repository holds, so that
@@ -110,7 +118,7 @@ module Zane::Commands
         raise UserError.new("cannot make a package name from `#{root.basename}`; name it with --name")
       end
       loop do
-        answer = question("Project name", default)
+        answer = question("Package name", default)
         return answer if Project.valid_name?(answer)
         @output.puts invalid_name(answer)
       end
@@ -120,15 +128,15 @@ module Zane::Commands
       "`#{name}` is not a package name: it starts with a lowercase letter and holds only letters and digits, like `myTool`"
     end
 
-    private def choose_kind(ask : Bool) : Project::Kind
-      if kind = @kind
-        return kind
+    private def choose_start(ask : Bool) : Start
+      if start = @start
+        return start
       end
-      return Project::Kind::Application unless ask
+      return Start::Program unless ask
       loop do
         case question("Library or application?", "application").downcase
-        when "a", "app", "application" then return Project::Kind::Application
-        when "l", "lib", "library"     then return Project::Kind::Library
+        when "a", "app", "application" then return Start::Program
+        when "l", "lib", "library"     then return Start::Library
         else                                @output.puts "Answer `library` or `application`."
         end
       end
@@ -167,13 +175,11 @@ module Zane::Commands
       false
     end
 
-    private def write(root : Path, name : String, kind : Project::Kind, pattern : String, release : CompilerRelease) : Nil
-      Dir.mkdir_p(root / "src")
+    private def write(root : Path, name : String, start : Start, pattern : String, release : CompilerRelease) : Nil
+      Dir.mkdir_p(root)
 
       Coda::Doc.new do |doc|
         manifest = doc.root
-        manifest["name"] = name
-        manifest["kind"] = kind.to_s
         manifest["zane-version"] = release.tag
         manifest["version-pattern"] = pattern
         manifest["deps"] = Coda::KeyedTable.new(["version", "from"])
@@ -187,10 +193,14 @@ module Zane::Commands
         File.write(root / "zane-lock.coda", doc.serialize(INDENT))
       end
 
-      if kind.application?
-        File.write(root / "src" / "main.zn", application_source(name))
+      if start.program?
+        Dir.mkdir_p(root / "bin" / name)
+        File.write(root / "bin" / name / "main.zn", application_source(name))
       else
-        File.write(root / "src" / "#{name}.zn", library_source(name))
+        Dir.mkdir_p(root / "lib" / name)
+        File.write(root / "lib" / name / "#{name}.zn", library_source(name))
+        Dir.mkdir_p(root / Project::TEST_PACKAGE / name)
+        File.write(root / Project::TEST_PACKAGE / name / "main.zn", test_source(name))
       end
 
       ignore = root / ".gitignore"
@@ -222,6 +232,39 @@ module Zane::Commands
 
         /// Every declaration is public unless its name starts with `_`.
         Int double(n Int) => n + n
+
+        ZANE
+    end
+
+    # The library package's test package, which imports it as any user does
+    # (spec packages.md §7); `zane test` builds and runs it.
+    private def test_source(name : String) : String
+      <<-ZANE
+        package test;
+
+        import #{name};
+
+        alias Int = @primitives$Int
+        alias Bool = @primitives$Bool
+        alias Unit = @primitives$Unit
+        alias String = @primitives$String
+
+        Unit check(ok Bool) {
+        \tpassed String("ok\\n");
+        \tfailed String("failed\\n");
+        \t@controlflow$branch(ok, {
+        \t\t@program$console!print(passed);
+        \t});
+        \t@controlflow$branch(~ok, {
+        \t\t@program$console!print(failed);
+        \t});
+        \treturn Unit();
+        }
+
+        Unit main() {
+        \tcheck(#{name}$double(Int(21)) == Int(42));
+        \treturn Unit();
+        }
 
         ZANE
     end
