@@ -1,7 +1,7 @@
 require "./spec_helper"
 
-# A compiler repository with releases v0.0 and v0.1 (annotated), and tags that
-# are not releases. Built once; `ls-remote` reads it like the real one.
+# A compiler repository with releases v0.0 through v0.3 (v0.1 annotated), and
+# tags that are not releases. Built once; `ls-remote` reads it like the real one.
 COMPILER = File.join(Dir.tempdir, "zane-spec-compiler-#{Process.pid}")
 
 private def git(*args, dir = COMPILER) : String
@@ -21,6 +21,10 @@ git("tag", "v0.1.5")
 git("tag", "nightly")
 V01 = git("rev-parse", "HEAD")
 V00 = git("rev-parse", "HEAD~1")
+git("tag", "v0.2")
+git("commit", "-q", "--allow-empty", "-m", "machine operations")
+git("tag", "v0.3")
+V03 = git("rev-parse", "HEAD")
 
 private def with_tmp(&)
   dir = File.join(Dir.tempdir, "zane-spec-#{Random::Secure.hex(6)}")
@@ -54,7 +58,8 @@ end
 describe Zane::CompilerRelease do
   it "takes the newest vMAJOR.MINOR tag, at the commit an annotated tag points to" do
     release = Zane::CompilerRelease.resolve(nil, COMPILER)
-    release.should eq Zane::CompilerRelease.new("v0.1", V01)
+    release.should eq Zane::CompilerRelease.new("v0.3", V03)
+    Zane::CompilerRelease.resolve("v0.1", COMPILER).should eq Zane::CompilerRelease.new("v0.1", V01)
   end
 
   it "takes a named release" do
@@ -98,7 +103,7 @@ describe Zane::CompilerRelease do
   end
 
   it "refuses a tag that is not a release" do
-    expect_raises(Zane::UserError, "has no release v0.1.5; its releases are v0.0, v0.1") do
+    expect_raises(Zane::UserError, "has no release v0.1.5; its releases are v0.0, v0.1, v0.2, v0.3") do
       Zane::CompilerRelease.resolve("v0.1.5", COMPILER)
     end
   end
@@ -124,17 +129,17 @@ describe Zane::Commands::Init do
   it "creates an application with the newest compiler pinned" do
     with_tmp do |tmp|
       output = init([(tmp / "my-app").to_s, "--no-git"])
-      output.should contain "built by the compiler v0.1, the newest release."
+      output.should contain "built by the compiler v0.3, the newest release."
       root = tmp / "my-app"
 
       manifest = read_coda(root / "zane.coda")
       manifest.keys.should eq ["zane-version", "version-pattern", "deps"]
-      manifest["zane-version"].should eq "v0.1"
+      manifest["zane-version"].should eq "v0.3"
       manifest["version-pattern"].should eq "v*.+.++"
       manifest["deps"].should eq({"columns" => ["version", "from"], "rows" => {} of String => Hash(String, String)})
 
       lock = read_coda(root / "zane-lock.coda")
-      lock["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {"zane" => {"url" => COMPILER, "commit" => V01}}})
+      lock["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {"zane" => {"url" => COMPILER, "commit" => V03}}})
 
       File.read(root / "bin" / "myApp" / "main.zn").should start_with "package myApp;\n"
       Dir.exists?(root / "test").should be_false
@@ -183,10 +188,10 @@ describe Zane::Commands::Init do
 
   it "creates a library package with a test package that imports it" do
     with_tmp do |tmp|
-      output = init([(tmp / "geo").to_s, "--lib", "--name", "geometry", "--zane-version", "v0.0", "--no-git"])
+      output = init([(tmp / "geo").to_s, "--lib", "--name", "geometry", "--zane-version", "v0.3", "--no-git"])
       output.should contain "with the library package lib/geometry/ and its test package test/geometry/"
       manifest = read_coda(tmp / "geo" / "zane.coda")
-      manifest["zane-version"].should eq "v0.0"
+      manifest["zane-version"].should eq "v0.3"
       library = File.read(tmp / "geo" / "lib" / "geometry" / "geometry.zn")
       library.should contain "package geometry;"
       library.should contain "@primitives$I64 double(n @primitives$I64) => @operators$add(n, n)"
@@ -197,6 +202,48 @@ describe Zane::Commands::Init do
       test.should contain "check(@operators$equal(geometry$double(I64(21)), I64(42)));"
       test.should contain "@controlflow$branch(@operators$not(ok), {"
       test.should contain %(passed String("ok\\n");)
+    end
+  end
+
+  it "writes nothing for a library pinned to a compiler before v0.3" do
+    with_tmp do |tmp|
+      {"v0.0", "v0.1", "v0.2"}.each do |tag|
+        root = tmp / tag
+        expect_raises(Zane::UserError, "the library template requires compiler v0.3 or newer; selected #{tag}") do
+          init([root.to_s, "--lib", "--name", "geometry", "--zane-version", tag])
+        end
+        File.exists?(root).should be_false
+      end
+    end
+  end
+
+  it "leaves an existing directory untouched when the newest installed compiler is too old for a library" do
+    with_tmp do |tmp|
+      with_toolchains do
+        offline = "https://zane.invalid/compiler"
+        install("v0.2", V01, url: offline)
+        File.write(tmp / "README.md", "# geometry\n")
+        expect_raises(Zane::UserError, "the library template requires compiler v0.3 or newer; selected v0.2") do
+          init([tmp.to_s, "--lib", "--name", "geometry"], url: offline)
+        end
+        Dir.children(tmp).should eq ["README.md"]
+        File.read(tmp / "README.md").should eq "# geometry\n"
+      end
+    end
+  end
+
+  it "accepts newer minor and major compiler versions for a library without going online" do
+    with_tmp do |tmp|
+      with_toolchains do
+        offline = "https://zane.invalid/compiler"
+        {"v0.3", "v0.10", "v1.0"}.each do |tag|
+          install(tag, V03, url: offline)
+          root = tmp / tag
+          init([root.to_s, "--lib", "--name", "geometry", "--no-git"], url: offline)
+          read_coda(root / "zane.coda")["zane-version"].should eq tag
+          File.read(root / "lib" / "geometry" / "geometry.zn").should contain "@operators$add(n, n)"
+        end
+      end
     end
   end
 

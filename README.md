@@ -103,6 +103,8 @@ zane test
 ```
 
 `init` pins an installed compiler toolchain or a published compiler tag.
+`init --lib` requires compiler v0.3 or newer for the generated `I64` and
+`@operators$` examples; selecting an older compiler fails before writing files.
 `ZANE_COMPILER` overrides the compiler
 executable used to check and build it.
 

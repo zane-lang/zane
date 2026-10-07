@@ -73,6 +73,7 @@ module Zane::Commands
       pattern = choose_version_pattern(ask)
       git = choose_git(root, ask)
       release = CompilerRelease.resolve(@zane_version, @compiler_url, @toolchains)
+      check_library_compiler(release) if start.library?
       if git && !Process.find_executable("git")
         raise UserError.new("git is not installed; run again with --no-git")
       end
@@ -173,6 +174,15 @@ module Zane::Commands
       Process.run("git", ["-C", dir.to_s, "rev-parse", "--is-inside-work-tree"]).success?
     rescue File::NotFoundError
       false
+    end
+
+    # v0.3 introduced I64 and @operators$, which the library and its test use.
+    private def check_library_compiler(release : CompilerRelease) : Nil
+      version = CompilerRelease::TAG.match(release.tag).not_nil!
+      return if version[1].to_i > 0 || version[2].to_i >= 3
+      raise UserError.new(
+        "the library template requires compiler v0.3 or newer; selected #{release.tag}. " \
+        "Install a newer toolchain with `zane toolchain install`, or select one with --zane-version v0.3; nothing was written")
     end
 
     private def write(root : Path, name : String, start : Start, pattern : String, release : CompilerRelease) : Nil
