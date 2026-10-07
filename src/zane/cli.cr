@@ -18,7 +18,8 @@ module Zane::CLI
       test [test]            build and run every test package in test/, or the one named
       clean                  delete out/
       inspect <view> [program]  print the compiler's view of a program: cst, sst, decls,
-                             tst, cgt or ll; --optimize for an optimized build's
+                             tst, cgt or ll; the last four also take --optimize and
+                             --target TRIPLE, as zane build does
       add <url> [tag]        depend on the library at url, at its newest tag or the one named;
                              with --test, for the test package alone
       remove <key>           stop depending on key
