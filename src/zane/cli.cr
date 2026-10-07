@@ -4,6 +4,7 @@ require "./commands/build"
 require "./commands/cache"
 require "./commands/deps"
 require "./commands/init"
+require "./commands/inspect"
 require "./commands/toolchain"
 
 module Zane::CLI
@@ -16,6 +17,8 @@ module Zane::CLI
       run [program]          build a program, then run it
       test [test]            build and run every test package in test/, or the one named
       clean                  delete out/
+      inspect <view> [program]  print the compiler's view of a program: cst, sst, decls,
+                             tst, cgt or ll; --optimize for an optimized build's
       add <url> [tag]        depend on the library at url, at its newest tag or the one named;
                              with --test, for the test package alone
       remove <key>           stop depending on key
@@ -50,6 +53,7 @@ module Zane::CLI
     when "run"       then return Commands::Run.new(args[1..], stdout, stderr).run
     when "test"      then return Commands::Test.new(args[1..], stdout, stderr).run
     when "clean"     then return Commands::Clean.new(args[1..], stdout, stderr).run
+    when "inspect"   then return Commands::Inspect.new(args[1..], stdout, stderr).run
     when "add"       then return Commands::Add.new(args[1..], stdout, stderr).run
     when "fetch"     then return Commands::Fetch.new(args[1..], stdout, stderr).run
     when "remove"    then return Commands::Remove.new(args[1..], stdout, stderr).run

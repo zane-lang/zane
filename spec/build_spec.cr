@@ -376,6 +376,55 @@ describe Zane::Commands do
     end
   end
 
+  it "inspects a program's build, optimized and for a target when asked" do
+    with_project do |root, log|
+      zane(Zane::Commands::Inspect, ["cgt"], root)[0].should eq 0
+      zane(Zane::Commands::Inspect, ["cgt", "demo", "--optimize"], root)[0].should eq 0
+      zane(Zane::Commands::Inspect, ["ll", "--target", "x86_64-windows-gnu"], root)[0].should eq 0
+      flags = "--kind application --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"
+      logged(log).should eq [
+        "--cgt #{flags}",
+        "--cgt --optimize #{flags}",
+        "--ll --target x86_64-windows-gnu #{flags}",
+      ]
+      Dir.exists?(root / "out").should be_false
+    end
+  end
+
+  it "inspects each source file of the program for a view of one file" do
+    files = {"bin/demo/b.zn" => "package demo;\n", "bin/demo/a.zn" => "package demo;\n"}
+    with_project(files) do |root|
+      status, output, _ = zane(Zane::Commands::Inspect, ["sst"], root)
+      status.should eq 0
+      output.should eq <<-TEXT
+        a.zn:
+        program ran with [--sst, #{root / "bin" / "demo" / "a.zn"}]
+        b.zn:
+        program ran with [--sst, #{root / "bin" / "demo" / "b.zn"}]
+
+        TEXT
+      expect_raises(Zane::UserError, "--optimize and --target apply to decls, tst, cgt, ll") do
+        zane(Zane::Commands::Inspect, ["cst", "--optimize"], root)
+      end
+    end
+  end
+
+  it "asks for a view it knows, and for a program when there are several" do
+    with_project({"bin/demo/main.zn" => "package demo;\n", "bin/tool/main.zn" => "package tool;\n"}) do |root, log|
+      expect_raises(Zane::UserError, "inspect needs a view") do
+        zane(Zane::Commands::Inspect, [] of String, root)
+      end
+      expect_raises(Zane::UserError, "ast is no view; the views are cst, sst, decls, tst, cgt, ll") do
+        zane(Zane::Commands::Inspect, ["ast"], root)
+      end
+      expect_raises(Zane::UserError, "the project has 2 programs, demo, tool; name the one to inspect") do
+        zane(Zane::Commands::Inspect, ["tst"], root)
+      end
+      zane(Zane::Commands::Inspect, ["tst", "tool"], root)[0].should eq 0
+      logged(log).should eq ["--tst --kind application --package tool=#{root / "bin" / "tool"} --import tool:tool=tool"]
+    end
+  end
+
   it "cleans out/" do
     with_project do |root|
       zane(Zane::Commands::Build, [] of String, root)
