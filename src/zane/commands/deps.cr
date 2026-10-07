@@ -5,6 +5,7 @@ require "../errors"
 require "../git"
 require "../graph"
 require "../home"
+require "../layout"
 require "../manifest"
 require "../cache"
 require "../package_url"
@@ -53,7 +54,7 @@ module Zane::Commands
     # included, so that a change which leaves the project or its tests unable
     # to build is refused before either file is written.
     private def fetch(manifest : Manifest) : Graph
-      graph = Graph.new(Workspace.new(manifest), test: true)
+      graph = Graph.new(Workspace.new(manifest), workspace.layout, test: true)
       graph.objects(Target::HOST, Compiler.locate(workspace.zane_version, @toolchains))
       Commands.report(graph, @error)
       graph
@@ -88,6 +89,21 @@ module Zane::Commands
       {tag, commit}
     end
 
+    # The names of the public library packages *dep* gives the project
+    # (spec packages.md §4.3), read from its checkout or local project. Nil
+    # when its code cannot be read here.
+    private def package_names(dep : Dependency) : Array(String)?
+      root = if Manifest.path?(dep.from)
+               Path[dep.from].expand(workspace.root)
+             else
+               resolution = workspace.manifest.resolutions[dep.key]
+               CacheEntry.new(PackageUrl.parse(resolution.url), dep.version).source(resolution.commit)
+             end
+      Layout.new(root).public_libs.map(&.name)
+    rescue UserError
+      nil
+    end
+
     # Whether two commit hashes, either of them abbreviated, are one commit.
     private def same_commit?(a : String, b : String) : Bool
       a.starts_with?(b) || b.starts_with?(a)
@@ -95,8 +111,8 @@ module Zane::Commands
   end
 
   # `zane add <url> [tag] [--as key] [--from-source] [--test]` (§3): pins a
-  # library, fetches it, and records it in both of the project's files, in
-  # `test-deps` when *--test* says only the test package imports it.
+  # project, fetches it, and records it in both of the project's files, in
+  # `test-deps` when *--test* says only the test packages import it.
   class Add < EditCommand
     @key : String? = nil
     @from_source = false
@@ -113,14 +129,11 @@ module Zane::Commands
     private def options(p : OptionParser) : Nil
       p.on("--as KEY", "The key to import the library by, instead of the last part of its URL") { |v| @key = v }
       p.on("--from-source", "Compile the library here rather than link its prebuilt objects") { @from_source = true }
-      p.on("--test", "Record it in `test-deps`, for the test package alone") { @test = true }
+      p.on("--test", "Record it in `test-deps`, for the test packages alone") { @test = true }
     end
 
     def run : Int32
       ws = workspace
-      if @test && ws.kind.application?
-        raise UserError.new("`#{ws.name}` is an application, which has no test package and so no `test-deps`")
-      end
       url = PackageUrl.parse(@args[0])
       key = choose_key(ws, url)
       tags = Git.tags(url.url)
@@ -129,14 +142,16 @@ module Zane::Commands
       dep = Dependency.new(key, tag, @from_source ? "source" : "release", @test)
       # The whole graph is fetched for the host before anything is written,
       # so a library that cannot be used is never recorded.
-      fetch(ws.manifest.with_dependency(dep, Resolution.new(url.url, commit)))
+      graph = fetch(ws.manifest.with_dependency(dep, Resolution.new(url.url, commit)))
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) { ProjectFiles.deps(doc, @test)[key] = Coda::Row.new.insert("version", tag).insert("from", dep.from); nil },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc)[key] = Coda::Row.new.insert("url", url.url).insert("commit", commit); nil })
 
       how = @from_source ? "compiled from source" : "prebuilt for #{Target::HOST}"
       @output.puts "Added #{key} #{tag} (#{url}, commit #{commit[0, 12]}), #{how}#{@test ? ", for the tests" : ""}."
-      @output.puts "Import it#{@test ? " in test/" : ""} with: import #{key}"
+      edge = (@test ? graph.test_direct : graph.direct).find! { |e| e.key == key }
+      imports = edge.package.layout.public_libs.map { |l| "import #{l.name}" }
+      @output.puts "Import its packages#{@test ? " in test/" : ""} with: #{imports.join(", ")}"
       0
     end
 
@@ -148,9 +163,6 @@ module Zane::Commands
       if key == Manifest::COMPILER_KEY
         raise UserError.new("`#{key}` is reserved for the compiler; choose another key with --as")
       end
-      if key == Manifest::TEST_PACKAGE
-        raise UserError.new("`#{key}` is the name of the test package; choose another key with --as")
-      end
       if ws.manifest.dependency?(key)
         raise UserError.new("the project already depends on `#{key}`; change its version with `zane update`")
       end
@@ -159,7 +171,7 @@ module Zane::Commands
   end
 
   # `zane remove <key>` (§3): drops a dependency from both files, and points
-  # out the source files that still import it.
+  # out the source files that still import one of its packages.
   class Remove < EditCommand
     def usage : String
       "usage: zane remove <key>"
@@ -173,12 +185,13 @@ module Zane::Commands
       ws = workspace
       dep = dependency(@args[0])
       key = dep.key
+      names = package_names(dep) || [] of String
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) { ProjectFiles.deps(doc, dep.test).delete(key); nil },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc).delete(key); nil })
       @output.puts "Removed #{key}."
-      (ws.importers(ws.source_dir, key) + ws.importers(ws.test_dir, key)).each do |file, line|
-        @error.puts "zane: warning: #{file}:#{line} still imports #{key}"
+      ws.importers(names).each do |file, line|
+        @error.puts "zane: warning: #{file}:#{line} still imports a package of #{key}"
       end
       0
     end
@@ -288,15 +301,16 @@ module Zane::Commands
 
     # A local project stands in for the release it replaces, and is named
     # with that release's stamp (spec dependencies.md §12.2), so it has to
-    # be the same package: its manifest names the package the pinned commit's
-    # does.
+    # be the same package: it gives the public library packages the pinned
+    # commit's does.
     private def same_package(dep : Dependency, dir : Path) : Nil
-      local = Manifest.load(dir).name
+      local = Layout.new(dir).public_libs.map(&.name).sort
       resolution = workspace.manifest.resolutions[dep.key]
-      pinned = Manifest.load(CacheEntry.new(PackageUrl.parse(resolution.url), dep.version).source(resolution.commit)).name
+      source = CacheEntry.new(PackageUrl.parse(resolution.url), dep.version).source(resolution.commit)
+      pinned = Layout.new(source).public_libs.map(&.name).sort
       return if local == pinned
-      raise UserError.new("#{dir} is the package `#{local}`, but #{dep.key} #{dep.version} is the package `#{pinned}`; " \
-                          "a local project stands in for the same package")
+      raise UserError.new("#{dir} gives the packages #{local.join(", ")}, but #{dep.key} #{dep.version} gives " \
+                          "#{pinned.join(", ")}; a local project stands in for the same package")
     end
 
     # *path*, given from where the command runs, as the manifest writes it:
@@ -340,7 +354,7 @@ module Zane::Commands
 
       # The graph is read first, so a project that cannot resolve is left as
       # it was.
-      known = !@on || Graph.new(ws, test: true).package?(url)
+      known = !@on || Graph.new(ws, ws.layout, test: true).package?(url)
       ProjectFiles.change(ws.root, ->(doc : Coda::Doc) {
         if index = listed
           list = doc.root["remaps"].as_array
@@ -404,7 +418,7 @@ module Zane::Commands
     def run : Int32
       ws = workspace
       graph = @test ? test_graph : self.graph
-      @output.puts "#{ws.name} (#{ws.kind})"
+      @output.puts ws.title
       edges = graph.direct + graph.test_direct
       tests = graph.test_direct.map(&.key).to_set
       print(graph, edges, "", Set(String).new, tests)
@@ -446,8 +460,8 @@ module Zane::Commands
              in .source?  then "from source"
              in .path?    then "from #{package.manifest.root}"
              end
-      name = key == package.name ? key : "#{key} (#{package.name})"
-      "#{name} #{package.tag}, #{package.url}, #{from}"
+      names = package.layout.public_libs.map(&.name).join(", ")
+      "#{key} #{package.tag} (#{names}), #{package.url}, #{from}"
     end
   end
 end

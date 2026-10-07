@@ -90,13 +90,15 @@ cd hello
 zane check
 ```
 
-A library has no program of its own to run. `zane init --lib` also writes a
-test package in `test/`, which imports the library the way any other project
-would, and `zane test` builds and runs it:
+A project keeps library packages in `lib/`, programs in `bin/` and test
+packages in `test/`. `zane init` starts a program in `bin/<name>/`, which
+`zane run` builds and runs. `zane init --lib` starts a library package in
+`lib/<name>/` and a test package for it in `test/<name>/`, which imports it
+the way any other project would, and `zane test` builds and runs it:
 
 ```sh
-zane init mathLib --lib --yes
-cd mathLib
+zane init geometry --lib --name math --yes
+cd geometry
 zane test
 ```
 

@@ -40,25 +40,20 @@ module Zane
     DEPS      = "deps"
     TEST_DEPS = "test-deps"
 
-    # The name of a library's test package, which no manifest may take and
-    # no key may be (spec packages.md §7.1, dependencies.md §2.1).
-    TEST_PACKAGE = "test"
-
     # A commit hash, whole or abbreviated.
     COMMIT = /\A[0-9a-f]{7,64}\z/
 
     getter root : Path
-    getter name : String
-    getter kind : Project::Kind
     getter zane_version : String?
     getter version_pattern : String
     getter deps : Array(Dependency)
-    # The dependencies only the test package imports (packages.md §7.3).
+    # The dependencies whose packages only test packages import (packages.md
+    # §7.3).
     getter test_deps : Array(Dependency)
     getter remaps : Array(String)
     getter resolutions : Hash(String, Resolution)
 
-    def initialize(@root, @name, @kind, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions)
+    def initialize(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions)
     end
 
     def self.path?(from : String) : Bool
@@ -77,19 +72,6 @@ module Zane
     end
 
     private def self.read(root : Path, path : Path, doc : Coda::Block) : Manifest
-      name = field(doc, "name", path)
-      unless Project.valid_name?(name)
-        raise UserError.new("#{path}: `#{name}` is not a package name")
-      end
-      if name == TEST_PACKAGE
-        raise UserError.new("#{path}: `#{TEST_PACKAGE}` is the name of a library's test package, and no project's")
-      end
-      kind = case value = field(doc, "kind", path)
-             when "application" then Project::Kind::Application
-             when "library"     then Project::Kind::Library
-             else
-               raise UserError.new("#{path}: `kind` is `#{value}`; it is `application` or `library`")
-             end
       zane_version = doc.has_key?("zane-version") ? field(doc, "zane-version", path) : nil
       pattern = field(doc, "version-pattern", path)
       if error = Project.version_pattern_error(pattern)
@@ -97,13 +79,10 @@ module Zane
       end
       deps = read_deps(doc, path, DEPS)
       test_deps = read_deps(doc, path, TEST_DEPS)
-      if kind.application? && doc.has_key?(TEST_DEPS)
-        raise UserError.new("#{path}: an application has no test package, so no `#{TEST_DEPS}`")
-      end
       if both = test_deps.find { |t| deps.any? { |d| d.key == t.key } }
         raise UserError.new("#{path}: `#{both.key}` is in both `#{DEPS}` and `#{TEST_DEPS}`")
       end
-      new(root, name, kind, zane_version, pattern, deps, test_deps, read_remaps(doc, path), read_lock(root))
+      new(root, zane_version, pattern, deps, test_deps, read_remaps(doc, path), read_lock(root))
     end
 
     private def self.field(doc : Coda::Block, key : String, path : Path) : String
@@ -124,9 +103,6 @@ module Zane
         end
         if key == COMPILER_KEY
           raise UserError.new("#{path}: `#{COMPILER_KEY}` is reserved for the compiler, and is not a dependency key")
-        end
-        if key == TEST_PACKAGE
-          raise UserError.new("#{path}: `#{TEST_PACKAGE}` is the name of a library's test package, and is not a dependency key")
         end
         version = row["version"]? || raise UserError.new("#{path}: `#{key}` has no version")
         from = row["from"]? || raise UserError.new("#{path}: `#{key}` has no `from`")
@@ -198,7 +174,7 @@ module Zane
       else
         deps = deps.any? { |d| d.key == dep.key } ? deps.map { |d| d.key == dep.key ? dep : d } : deps + [dep]
       end
-      Manifest.new(@root, @name, @kind, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions)
+      Manifest.new(@root, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions)
     end
 
     # Every dependency: the `deps` rows, then the `test-deps` rows.

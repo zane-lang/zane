@@ -67,11 +67,12 @@ private class Registry
       Dir.mkdir_p(repo)
       git(repo, "init", "-q")
     end
-    Dir.mkdir_p(repo / "src")
-    File.write(repo / "src" / "#{name}.zn", "package #{package_name};\n")
+    FileUtils.rm_rf(repo / "lib")
+    FileUtils.rm_rf(repo / "bin")
+    dir = kind == "library" ? repo / "lib" / package_name : repo / "bin" / package_name
+    Dir.mkdir_p(dir)
+    File.write(dir / "#{name}.zn", "package #{package_name};\n")
     File.write(repo / "zane.coda", <<-CODA)
-      name #{package_name}
-      kind #{kind}
       zane-version v0.1
       version-pattern #{pattern}
 
@@ -113,10 +114,10 @@ private def with_registry(&)
   registry = Registry.new(base / "repos")
   project = base / "project"
   Dir.mkdir_p(registry.dir)
-  Dir.mkdir_p(project / "src")
-  File.write(project / "zane.coda", "name app\nkind application\nzane-version v0.1\nversion-pattern v*.+.++\n\ndeps [\n    key version from\n]\n")
+  Dir.mkdir_p(project / "bin" / "app")
+  File.write(project / "zane.coda", "zane-version v0.1\nversion-pattern v*.+.++\n\ndeps [\n    key version from\n]\n")
   File.write(project / "zane-lock.coda", "resolutions [\n    key url commit\n    zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567\n]\n")
-  File.write(project / "src" / "main.zn", "package app;\n")
+  File.write(project / "bin" / "app" / "main.zn", "package app;\n")
   saved = DEPS_ENV.to_h { |v| {v, ENV[v]?} }
   ENV["ZANE_COMPILER"] = DEPS_ZANEC
   ENV["FAKE_ZANEC_LOG"] = (base / "zanec.log").to_s
@@ -252,7 +253,7 @@ describe Zane::Commands::Add do
       rewritten = entry("math", "v1.2") / "build" / Zane::Target::HOST / "math.o"
       File.read(rewritten).should eq "rewritten #{stamp}\nobject math v1.2"
       File.read(entry("math", "v1.2") / "artifacts" / Zane::Target::HOST / "build" / "math.o").should eq "object math v1.2"
-      File.file?(entry("math", "v1.2") / "src" / "src" / "math.zn").should be_true
+      File.file?(entry("math", "v1.2") / "src" / "lib" / "math" / "math.zn").should be_true
       File.read_lines(log).size.should eq 1
     end
   end
@@ -265,7 +266,7 @@ describe Zane::Commands::Add do
       math = entry("math", "v1.0")
       id = registry.id("math", "v1.0")
       File.read_lines(log).last.should end_with(
-        "--package app=#{project / "src"} --package #{id}=#{math / "src" / "src"} " \
+        "--package app=#{project / "bin" / "app"} --package #{id}=#{math / "src" / "lib" / "math"} " \
         "--import app:math=#{id} --link #{math / "build" / Zane::Target::HOST / "math.o"}")
       registry.fetched.size.should eq 1
       File.read_lines(log).count(&.starts_with?("--rewrite")).should eq 1
@@ -281,9 +282,9 @@ describe Zane::Commands::Add do
       zane(["check"], project)[0].should eq 0
       shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
       File.read_lines(log).last.should eq(
-        "--check --kind application --package app=#{project / "src"} " \
-        "--package #{shapes}=#{entry("shapes", "v2.0") / "src" / "src"} --package #{math}=#{entry("math", "v1.0") / "src" / "src"} " \
-        "--import app:shapes=#{shapes} --import #{shapes}:math=#{math}")
+        "--check --kind application --package app=#{project / "bin" / "app"} " \
+        "--package #{shapes}=#{entry("shapes", "v2.0") / "src" / "lib" / "shapes"} --package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} " \
+        "--import #{shapes}:math=#{math} --import app:shapes=#{shapes}")
     end
   end
 
@@ -297,7 +298,7 @@ describe Zane::Commands::Add do
       id = registry.id("math", "v1.0")
       compiled = File.read_lines(log).select(&.starts_with?("--kind library --object"))
       compiled.size.should eq 1
-      compiled[0].should end_with "--package #{id}=#{entry("math", "v1.0") / "src" / "src"}"
+      compiled[0].should end_with "--package #{id}=#{entry("math", "v1.0") / "src" / "lib" / "math"}"
       object = entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST / "package.o"
       File.read(object).should contain "--package #{id}="
       File.read_lines(log).last.should end_with "--import app:math=#{id} --link #{object}"
@@ -314,13 +315,13 @@ describe Zane::Commands::Add do
       File.write(project / "zane-lock.coda", File.read(project / "zane-lock.coda").sub(/\]\n\z/, "    shapes #{registry.url("shapes")} #{commit}\n]\n"))
       zane(["build"], project)[0].should eq 0
       shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
-      object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("shapes")).identity_hash / "v2.0" / "shapes.o"
+      object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("shapes")).identity_hash / "v2.0" / "package.o"
       File.read_lines(log)[-2].should eq(
-        "--kind library --object #{object} --package #{shapes}=#{local / "src"} " \
-        "--package #{math}=#{entry("math", "v1.0") / "src" / "src"} --import #{shapes}:math=#{math}")
+        "--kind library --object #{object} --package #{shapes}=#{local / "lib" / "shapes"} " \
+        "--package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} --import #{shapes}:math=#{math}")
       File.read_lines(log).last.should end_with(
-        "--package #{shapes}=#{local / "src"} --package #{math}=#{entry("math", "v1.0") / "src" / "src"} " \
-        "--import app:shapes=#{shapes} --import #{shapes}:math=#{math} " \
+        "--package #{shapes}=#{local / "lib" / "shapes"} --package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} " \
+        "--import #{shapes}:math=#{math} --import app:shapes=#{shapes} " \
         "--link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"} --link #{object}")
       Dir.exists?(entry("shapes", "v2.0")).should be_false
     end
@@ -336,16 +337,16 @@ describe Zane::Commands::Add do
     end
   end
 
-  it "refuses an application, and a library without objects for the target" do
+  it "refuses a project with no public library package, and a library without objects for the target" do
     with_registry do |registry, project|
       registry.publish("tool", "v1.0", kind: "application")
-      expect_raises(Zane::UserError, "is an application") { zane(["add", registry.url("tool")], project) }
+      expect_raises(Zane::UserError, "has no public library package") { zane(["add", registry.url("tool")], project) }
       registry.publish("bare", "v1.0", artifacts: false)
       expect_raises(Zane::UserError, "set its `from` to `source`") { zane(["add", registry.url("bare")], project) }
     end
   end
 
-  it "imports a library by a key that is not its package name" do
+  it "labels a dependency with a key that source never writes, which imports its packages by their names" do
     with_registry do |registry, project, log|
       registry.publish("math-lib", "v1.0", package_name: "math")
       expect_raises(Zane::UserError, "cannot be the key; choose one with --as") { zane(["add", registry.url("math-lib")], project) }
@@ -353,7 +354,7 @@ describe Zane::Commands::Add do
       expect_raises(Zane::UserError, "already depends on `maths`") { zane(["add", registry.url("math-lib"), "--as", "maths"], project) }
       zane(["check"], project)[0].should eq 0
       id = "#{registry.stamp("math-lib", "v1.0")}math"
-      File.read_lines(log).last.should end_with "--package #{id}=#{entry("math-lib", "v1.0") / "src" / "src"} --import app:maths=#{id}"
+      File.read_lines(log).last.should end_with "--package #{id}=#{entry("math-lib", "v1.0") / "src" / "lib" / "math"} --import app:math=#{id}"
     end
   end
 end
@@ -365,7 +366,7 @@ describe Zane::Commands::Fetch do
       zane(["add", registry.url("math")], project)[0].should eq 0
       FileUtils.rm_rf(Zane::Home.packages)
       repo = registry.dir / "math"
-      File.write(repo / "src" / "math.zn", "package math; // moved\n")
+      File.write(repo / "lib" / "math" / "math.zn", "package math; // moved\n")
       git(repo, "commit", "-q", "-am", "moved")
       git(repo, "tag", "-f", "v1.0")
       expect_raises(Zane::UserError, "security error") { zane(["fetch"], project) }
@@ -399,8 +400,8 @@ describe Zane::Commands::Remove do
     with_registry do |registry, project|
       registry.publish("math", "v1.0")
       zane(["add", registry.url("math")], project)[0].should eq 0
-      File.write(project / "src" / "main.zn", "package app;\nimport math$sqrt;\nimport mathExtra;\n")
-      zane(["remove", "math"], project).should eq({0, "Removed math.\n", "zane: warning: src/main.zn:2 still imports math\n"})
+      File.write(project / "bin" / "app" / "main.zn", "package app;\nimport math$sqrt;\nimport mathExtra;\n")
+      zane(["remove", "math"], project).should eq({0, "Removed math.\n", "zane: warning: bin/app/main.zn:2 still imports a package of math\n"})
       deps_rows(project).should eq({} of String => Hash(String, String))
       lock_rows(project).keys.should eq ["zane"]
       expect_raises(Zane::UserError, "does not depend on `math`; it has no dependencies") { zane(["remove", "math"], project) }
@@ -428,7 +429,7 @@ describe Zane::Commands::Update do
       registry.publish("math", "v1.0")
       zane(["add", registry.url("math")], project)[0].should eq 0
       repo = registry.dir / "math"
-      File.write(repo / "src" / "math.zn", "package math; // moved\n")
+      File.write(repo / "lib" / "math" / "math.zn", "package math; // moved\n")
       git(repo, "commit", "-q", "-am", "moved")
       git(repo, "tag", "-f", "v1.0")
       moved = git(repo, "rev-parse", "HEAD")
@@ -436,7 +437,7 @@ describe Zane::Commands::Update do
       lock_rows(project)["math"]["commit"].should_not eq moved
       zane(["update", "math", "v1.0", "--accept-tag-move"], project)[0].should eq 0
       lock_rows(project)["math"]["commit"].should eq moved
-      File.read(entry("math", "v1.0") / "src" / "src" / "math.zn").should contain "moved"
+      File.read(entry("math", "v1.0") / "src" / "lib" / "math" / "math.zn").should contain "moved"
     end
   end
 
@@ -464,8 +465,8 @@ describe Zane::Commands::Dev do
       output.should contain "math now compiles from #{from}"
       deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => from}})
       zane(["build"], project)[0].should eq 0
-      object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("math")).identity_hash / "v1.0" / "math.o"
-      File.read_lines(log).last.should end_with "--package #{registry.id("math", "v1.0")}=#{local / "src"} " \
+      object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("math")).identity_hash / "v1.0" / "package.o"
+      File.read_lines(log).last.should end_with "--package #{registry.id("math", "v1.0")}=#{local / "lib" / "math"} " \
                                                 "--import app:math=#{registry.id("math", "v1.0")} --link #{object}"
 
       zane(["dev", "off", "math"], project)[1].should eq "math now links its release, v1.0.\n"
@@ -480,7 +481,7 @@ describe Zane::Commands::Dev do
       registry.publish("shapes", "v1.0")
       zane(["add", registry.url("math")], project)[0].should eq 0
       expect_raises(Zane::UserError, "is not a project") { zane(["dev", "math", registry.dir.to_s], project) }
-      expect_raises(Zane::UserError, "is the package `shapes`, but math v1.0 is the package `math`") do
+      expect_raises(Zane::UserError, "gives the packages shapes, but math v1.0 gives math") do
         zane(["dev", "math", (registry.dir / "shapes").to_s], project)
       end
       deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => "release"}})
@@ -518,63 +519,68 @@ describe Zane::Commands::Tree do
       zane(["add", registry.url("shapes")], project)[0].should eq 0
       zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
       zane(["tree"], project)[1].should eq <<-TEXT
-        app (application)
-        ├── shapes v2.0, https://example.com/shapes, prebuilt
-        │   └── math v1.0, https://example.com/math, from source
-        └── math v1.0, https://example.com/math, from source (see above)
+        project
+        ├── shapes v2.0 (shapes), https://example.com/shapes, prebuilt
+        │   └── math v1.0 (math), https://example.com/math, from source
+        └── math v1.0 (math), https://example.com/math, from source (see above)
 
         TEXT
     end
   end
 end
 
-# Makes the registry's project a library with a test package.
-private def make_library(project : Path) : Nil
-  File.write(project / "zane.coda", File.read(project / "zane.coda").sub("kind application", "kind library"))
-  Dir.mkdir_p(project / "test")
-  File.write(project / "test" / "main.zn", "package test;\nimport app;\n")
+# Gives the registry's project the library package geo and a test package
+# for it.
+private def add_library(project : Path) : Nil
+  Dir.mkdir_p(project / "lib" / "geo")
+  File.write(project / "lib" / "geo" / "geo.zn", "package geo;\n")
+  Dir.mkdir_p(project / "test" / "geo")
+  File.write(project / "test" / "geo" / "main.zn", "package test;\nimport geo;\n")
 end
 
 private def test_rows(project : Path)
   read_coda(project / "zane.coda")["test-deps"].as(Hash)["rows"]
 end
 
-describe "a library's test package" do
-  it "keeps test-deps out of the library's build and imports them into the test build" do
+describe "test-deps" do
+  it "gives their packages to the test packages alone" do
     with_registry do |registry, project, log|
       registry.publish("math", "v1.0")
       registry.publish("probe", "v3.0")
-      make_library(project)
+      add_library(project)
       zane(["add", registry.url("math")], project)[0].should eq 0
       status, output, _ = zane(["add", registry.url("probe"), "--test"], project)
       status.should eq 0
-      output.should contain "Import it in test/ with: import probe"
+      output.should contain "Import its packages in test/ with: import probe"
       deps_rows(project).as(Hash).keys.should eq ["math"]
       test_rows(project).should eq({"probe" => {"version" => "v3.0", "from" => "release"}})
       lock_rows(project).keys.should eq ["zane", "math", "probe"]
 
       math, probe = registry.id("math", "v1.0"), registry.id("probe", "v3.0")
-      math_src, probe_src = entry("math", "v1.0") / "src" / "src", entry("probe", "v3.0") / "src" / "src"
+      math_src, probe_src = entry("math", "v1.0") / "src" / "lib" / "math", entry("probe", "v3.0") / "src" / "lib" / "probe"
+      geo = "--package geo=#{project / "lib" / "geo"}"
       File.delete(log)
       zane(["check"], project)[0].should eq 0
       File.read_lines(log).should eq [
-        "--check --kind library --package app=#{project / "src"} --package #{math}=#{math_src} --import app:math=#{math}",
-        "--check --kind application --package test=#{project / "test"} --package app=#{project / "src"} " \
+        "--check --kind library #{geo} --package #{math}=#{math_src} --import geo:math=#{math}",
+        "--check --kind application --package app=#{project / "bin" / "app"} #{geo} --package #{math}=#{math_src} " \
+        "--import geo:math=#{math} --import app:geo=geo --import app:math=#{math}",
+        "--check --kind application --package test=#{project / "test" / "geo"} #{geo} " \
         "--package #{probe}=#{probe_src} --package #{math}=#{math_src} " \
-        "--import test:app=app --import test:math=#{math} --import test:probe=#{probe} --import app:math=#{math}",
+        "--import geo:math=#{math} --import test:geo=geo --import test:math=#{math} --import test:probe=#{probe}",
       ]
 
       File.delete(log)
       zane(["test"], project)[0].should eq 0
       File.read_lines(log).last.should end_with(
-        "--import app:math=#{math} " \
+        "--import test:probe=#{probe} " \
         "--link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"} " \
         "--link #{entry("probe", "v3.0") / "build" / Zane::Target::HOST / "probe.o"}")
 
       zane(["tree", "--test"], project)[1].should eq <<-TEXT
-        app (library)
-        ├── math v1.0, https://example.com/math, prebuilt
-        └── probe v3.0, https://example.com/probe, prebuilt (test)
+        project
+        ├── math v1.0 (math), https://example.com/math, prebuilt
+        └── probe v3.0 (probe), https://example.com/probe, prebuilt (test)
 
         TEXT
       zane(["tree"], project)[1].should_not contain "probe"
@@ -584,37 +590,26 @@ describe "a library's test package" do
       test_rows(project).should eq({"probe" => {"version" => "v3.1", "from" => "release"}})
       deps_rows(project).as(Hash).keys.should eq ["math"]
 
-      zane(["remove", "probe"], project)[0].should eq 0
+      File.write(project / "test" / "geo" / "main.zn", "package test;\nimport probe$;\n")
+      _, _, warning = zane(["remove", "probe"], project)
+      warning.should eq "zane: warning: test/geo/main.zn:2 still imports a package of probe\n"
       test_rows(project).should eq({} of String => Hash(String, String))
       lock_rows(project).keys.should eq ["zane", "math"]
     end
   end
 
-  it "refuses test-deps for an application, and the key `test`" do
+  it "refuses packages of one name among what a project or its tests import" do
     with_registry do |registry, project|
-      registry.publish("probe", "v3.0")
-      expect_raises(Zane::UserError, "`app` is an application, which has no test package") do
-        zane(["add", registry.url("probe"), "--test"], project)
+      registry.publish("math", "v1.0")
+      registry.publish("math-two", "v1.0", package_name: "math")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      expect_raises(Zane::UserError, "the project's tests reach two packages named `math`") do
+        zane(["add", registry.url("math-two"), "--as", "two", "--test"], project)
       end
-      expect_raises(Zane::UserError, "`test` is the name of the test package") do
-        zane(["add", registry.url("probe"), "--as", "test"], project)
-      end
-    end
-  end
-
-  it "refuses an import of a test-deps key in src/, and a key named like the library" do
-    with_registry do |registry, project|
-      registry.publish("probe", "v3.0")
-      make_library(project)
-      zane(["add", registry.url("probe"), "--test"], project)[0].should eq 0
-      File.write(project / "src" / "main.zn", "package app;\nimport probe$;\n")
-      expect_raises(Zane::UserError, "src/main.zn:2 imports `probe`, which is in `test-deps`") do
+      Dir.mkdir_p(project / "lib" / "math")
+      File.write(project / "lib" / "math" / "m.zn", "package math;\n")
+      expect_raises(Zane::UserError, "the project reaches two packages named `math`: lib/math/ and `math` of the dependency `math`") do
         zane(["check"], project)
-      end
-      File.write(project / "src" / "main.zn", "package app;\n")
-      zane(["add", registry.url("probe"), "--as", "app"], project)[0].should eq 0
-      expect_raises(Zane::UserError, "the key `app` is the library's own name") do
-        zane(["test"], project)
       end
     end
   end
@@ -623,7 +618,7 @@ end
 describe Zane::Manifest do
   it "reads test-deps and holds them to the rules of dependencies.md §2.1" do
     with_registry do |_, project|
-      base = File.read(project / "zane.coda").sub("kind application", "kind library")
+      base = File.read(project / "zane.coda")
       lock = File.read(project / "zane-lock.coda")
       write = ->(manifest : String, locked : String) {
         File.write(project / "zane.coda", manifest)
@@ -643,12 +638,6 @@ describe Zane::Manifest do
       expect_raises(Zane::UserError, "zane-lock.coda has no row for `probe`") { Zane::Manifest.load(project) }
       write.call(base.sub("]", "    probe v1.0 release\n]") + tests, with_probe)
       expect_raises(Zane::UserError, "`probe` is in both `deps` and `test-deps`") { Zane::Manifest.load(project) }
-      write.call(base.sub("kind library", "kind application") + tests, with_probe)
-      expect_raises(Zane::UserError, "an application has no test package, so no `test-deps`") { Zane::Manifest.load(project) }
-      write.call(base.sub("name app", "name test"), lock)
-      expect_raises(Zane::UserError, "`test` is the name of a library's test package, and no project's") { Zane::Manifest.load(project) }
-      write.call(base + tests.sub("probe v1.0", "test v1.0"), lock.sub(/\]\n\z/, "    test https://example.com/probe 0123456789abcdef\n]\n"))
-      expect_raises(Zane::UserError, "`test` is the name of a library's test package, and is not a dependency key") { Zane::Manifest.load(project) }
     end
   end
 end
@@ -711,8 +700,8 @@ describe Zane::Graph do
       zane(["build"], project)[0].should eq 0
       shapes, math1, math2 = registry.id("shapes", "v1.0"), registry.id("math", "v1.0"), registry.id("math", "v2.0")
       line = File.read_lines(log).last
-      line.should contain "--package #{math1}=#{entry("math", "v1.0") / "src" / "src"}"
-      line.should contain "--package #{math2}=#{entry("math", "v2.0") / "src" / "src"}"
+      line.should contain "--package #{math1}=#{entry("math", "v1.0") / "src" / "lib" / "math"}"
+      line.should contain "--package #{math2}=#{entry("math", "v2.0") / "src" / "lib" / "math"}"
       line.should contain "--import app:shapes=#{shapes} --import app:math=#{math2}"
       line.should contain "--import #{shapes}:math=#{math1}"
       line.should contain "--link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"}"
@@ -721,15 +710,18 @@ describe Zane::Graph do
     end
   end
 
-  it "links two packages of one name side by side" do
+  it "links two packages of one name side by side, when no one project reaches both" do
     with_registry do |registry, project, log|
       registry.publish("math", "v1.0")
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0"}])
       registry.publish("other-math", "v1.0", package_name: "math")
-      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
       zane(["add", registry.url("other-math"), "--as", "otherMath"], project)[0].should eq 0
       zane(["check"], project)[0].should eq 0
       other = "#{registry.stamp("other-math", "v1.0")}math"
-      File.read_lines(log).last.should end_with "--import app:math=#{registry.id("math", "v1.0")} --import app:otherMath=#{other}"
+      line = File.read_lines(log).last
+      line.should contain "--import #{registry.id("shapes", "v1.0")}:math=#{registry.id("math", "v1.0")}"
+      line.should end_with "--import app:shapes=#{registry.id("shapes", "v1.0")} --import app:math=#{other}"
     end
   end
 
@@ -762,7 +754,7 @@ describe Zane::Graph do
       File.read(remapped / "1-shapes.o").should start_with "remapped #{old} #{new}\n"
 
       tree = zane(["tree"], project)[1]
-      tree.should contain "│   └── math v1.0.0, https://example.com/math, prebuilt (remapped onto v1.2.0)"
+      tree.should contain "│   └── math v1.0.0 (math), https://example.com/math, prebuilt (remapped onto v1.2.0)"
       tree.should contain "Side by side: https://example.com/math v1.2.0, v2.0.0"
       tree.should contain "Remapped: https://example.com/math v1.0.0 onto v1.2.0"
     end
@@ -807,11 +799,11 @@ describe "remapping more than one version" do
 
       tree = zane(["tree"], project)[1]
       tree.should contain <<-TEXT
-        ├── shapes v1.0, https://example.com/shapes, prebuilt
-        │   └── math v1.0.0, https://example.com/math, prebuilt (remapped onto v1.2.0)
-        │       └── util v1.0, https://example.com/util, prebuilt
+        ├── shapes v1.0 (shapes), https://example.com/shapes, prebuilt
+        │   └── math v1.0.0 (math), https://example.com/math, prebuilt (remapped onto v1.2.0)
+        │       └── util v1.0 (util), https://example.com/util, prebuilt
         TEXT
-      tree.should contain "└── math v1.2.0, https://example.com/math, prebuilt (see above)"
+      tree.should contain "└── math v1.2.0 (math), https://example.com/math, prebuilt (see above)"
     end
   end
 end

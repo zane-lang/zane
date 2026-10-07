@@ -9,19 +9,8 @@ module Zane
 
     DEFAULT_VERSION_PATTERN = "v*.+.++"
 
-    enum Kind
-      Application
-      Library
-
-      # The name the manifest's `kind` field uses.
-      def to_s : String
-        application? ? "application" : "library"
-      end
-
-      def to_s(io : IO) : Nil
-        io << to_s
-      end
-    end
+    # The name every test package declares (spec packages.md §7.1).
+    TEST_PACKAGE = "test"
 
     def self.valid_name?(name : String) : Bool
       NAME.matches?(name)

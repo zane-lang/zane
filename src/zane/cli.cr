@@ -12,9 +12,9 @@ module Zane::CLI
 
       init [dir]             create a project in dir, or in the current directory
       check                  check the project without building it
-      build                  build the program into out/
-      run                    build the program, then run it
-      test [-- ARGS]         build a library's test package in test/, then run it
+      build [program]        build every program in bin/, or the one named, into out/
+      run [program]          build a program, then run it
+      test [test]            build and run every test package in test/, or the one named
       clean                  delete out/
       add <url> [tag]        depend on the library at url, at its newest tag or the one named;
                              with --test, for the test package alone

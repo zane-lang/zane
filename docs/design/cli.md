@@ -59,8 +59,8 @@ In a terminal, `init` asks these questions, showing the default for each:
 | Question | Default | Written to |
 |---|---|---|
 | Create the project in `<absolute path>`? | yes | — |
-| Project name | the directory's name, converted to camelCase | `name` |
-| Library or application? | application | `kind` |
+| Package name | the directory's name, converted to camelCase | the first package's directory |
+| Library or application? | application | whether it starts in `lib/` or `bin/` |
 | Version pattern | `v*.+.++` | `version-pattern` |
 | Initialise a Git repository? | yes, unless already inside one | — |
 
@@ -90,62 +90,73 @@ which compiler it pinned and where it found it.
 `init` writes nothing until every question is answered, so cancelling leaves the
 directory untouched. It then writes:
 
-- `zane.coda`, with `name`, `kind`, `zane-version` and `version-pattern`, and an
-  empty `deps` table;
+- `zane.coda`, with `zane-version` and `version-pattern`, and an empty `deps`
+  table;
 - `zane-lock.coda`, holding only the reserved `zane` row;
-- `src/main.zn` with a `main` for an application, or `src/<name>.zn` with one
-  public example function for a library;
-- for a library, `test/main.zn`, a test package whose `main` imports the
-  library and calls that function
-  ([`packages.md` §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#7-the-test-package));
+- for an application, `bin/<name>/main.zn`, a program package with a `main`;
+- for a library, `lib/<name>/<name>.zn`, a library package with one public
+  example function, and `test/<name>/main.zn`, a test package whose `main`
+  imports it and checks that function
+  ([`packages.md` §2.1 and §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#21-a-projects-packages-live-in-lib-bin-and-test));
 - `.gitignore` listing `out/`, appended to if one exists.
 
 ### 2.2 `zane check`
 
 Runs the compiler up to and including semantic checking and stops. This is the
-fast loop while editing. In a library with a `test/` directory it checks the
-test package as well, in the test build of §2.5, so a change to the library
-that breaks its tests shows up here. It works from any directory inside the
-project, as
-every command below does: `zane` looks for `zane.coda` there and in each
-directory above.
+fast loop while editing. It checks the project's library packages together, in
+a build with no root, then each program package and each test package as the
+root of its own build (§5), and stops at the first that fails. It works from
+any directory inside the project, as every command below does: `zane` looks
+for `zane.coda` there and in each directory above.
 
-### 2.3 `zane build [--target T] [-o OUT]`
+Before calling the compiler, `zane` reads the project's packages from `lib/`,
+`bin/` and `test/` and holds them to the rules of
+[`packages.md` §2 and §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#2-projects-and-packages), since it is
+the one listing the directories: a `.zn` file directly in one of the three, a
+program package with a subdirectory of sources, a nested test package that
+mirrors no subpackage, and the names a project keeps apart.
+
+### 2.3 `zane build [PROGRAM] [--target T] [-o OUT]`
 
 Resolves and fetches dependencies
 ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)),
-then has `zanec` compile the project and link it. The output goes to
-`out/<target>/<name>` unless `-o` says otherwise, with `out/host/<name>` when
-no target is given. The program is optimized. `T` is a target triple, spelled
-as `zig cc` reads it, such as `x86_64-windows-gnu`
+then has `zanec` compile and link every program package in `bin/`, or the one
+named. Each goes to `out/<target>/<name>`, with `out/host/<name>` when no
+target is given, and `-o` names the file when one program is built. The
+program is optimized. `T` is a target triple, spelled as `zig cc` reads it,
+such as `x86_64-windows-gnu`
 ([compiler `platforms.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/platforms.md)),
 and defaults to the host, which `zane` names the same way: `x86_64-linux-gnu`,
-`aarch64-macos`, and so on. That name is the row it looks up in a library's
-`zane-artifacts.coda`. A dependency with no artifact for `T` stops the build
-with an error that names it and suggests `from source`. A library is refused:
-it is checked with `check` and published with `release`.
+`aarch64-macos`, and so on. That name is the row it looks up in a
+dependency's `zane-artifacts.coda`. A dependency with no artifact for `T`
+stops the build with an error that names it and suggests `from source`. A
+project with no program package is refused: its library packages are checked
+with `check` and published with `release`.
 
-### 2.4 `zane run [-- ARGS]`
+### 2.4 `zane run [PROGRAM] [-- ARGS]`
 
-Builds for the host into `out/run/<name>`, then runs the program with `ARGS`
-and exits with its status. It does not optimize, which makes the build about
-three times faster; the program means the same either way, so only its speed
-differs from what `build` makes. It refuses a library.
+Builds a program package for the host into `out/run/<name>`, then runs it with
+`ARGS` and exits with its status. A project with several programs names the
+one to run. It does not optimize, which makes the build about three times
+faster; the program means the same either way, so only its speed differs from
+what `build` makes.
 
-### 2.5 `zane test [-- ARGS]`
+### 2.5 `zane test [TEST] [-- ARGS]`
 
-Builds the library's test build for the host into `out/test/<name>`, then runs
-it with `ARGS` and exits with its status, unoptimized as `run` is. The test
-package in `test/` is the root and the program; the library is compiled from
-`src/` as its dependency
-([`packages.md` §7.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#72-the-test-package-is-the-root-of-a-test-build)).
+Builds every test package in `test/`, or the one named by its directory under
+`test/`, such as `gui/opengl`, for the host into `out/test/`, and runs each
+with `ARGS`, unoptimized as `run` is. Each test package is the root of its
+own build, and the project's library packages are compiled with it
+([`packages.md` §7.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#72-each-test-package-is-the-root-of-its-own-test-build)).
 The graph is the project's `deps` and `test-deps` together
 ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)).
-It refuses an application, and a library with no `.zn` file in `test/`.
+Run on one test package, `test` exits with its status. Run on all, it names
+each as it starts, then says how many passed or which failed, and exits with
+1 when any did. A project with no test package is refused.
 
 What a test does and how it reports is the test package's own business: `zane`
-runs one program and passes on its exit status, so a testing library in
-`test-deps` decides how failures are counted and shown.
+runs one program for each and passes on its exit status, so a testing library
+in `test-deps` decides how failures are counted and shown.
 
 ### 2.6 `zane clean`
 
@@ -161,8 +172,8 @@ they always change the two files together
 
 | Command | Does |
 |---|---|
-| `zane add <url> [tag] [--as key] [--from-source] [--test]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Fetches the library and everything it depends on for the host before writing either file, so a missing artifact shows up immediately and a library that cannot be used is never recorded. Refuses a package whose `kind` is `application`. Prints the `import` line to use. With `--test`, writes the row into `test-deps` instead of `deps`, and refuses to in an application project. |
-| `zane remove <key>` | Removes the key, from `deps` or `test-deps`, from both files, and warns about each line of `src/` or `test/` that still imports it. |
+| `zane add <url> [tag] [--as key] [--from-source] [--test]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Fetches the library and everything it depends on for the host before writing either file, so a missing artifact shows up immediately and a library that cannot be used is never recorded. Refuses a project with no public library package. Prints the `import` lines for its public library packages. With `--test`, writes the row into `test-deps` instead of `deps`. |
+| `zane remove <key>` | Removes the key, from `deps` or `test-deps`, from both files, and warns about each line of the project's packages that still imports one of its packages. |
 | `zane update [key [tag]] [--accept-tag-move]` | Moves one key, or every key, to the tag named, or else the newest, and pins its commit. A tag that now points to another commit than the lock file pins has moved, and is refused with a security error without the flag. |
 | `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. |
 | `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
@@ -183,9 +194,9 @@ and warn about each URL in `remaps` that names no package of the graph
 project's two files and, recursively, from each dependency's own two files at
 its pinned commit ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)).
 Only `check` stops before the objects: it needs the sources alone. The
-project's `test-deps` rows join the graph for `test`, `fetch`, and `check` of a
-library with a `test/` directory, and never for `build` or `run`; a
-dependency's own `test-deps` never join it
+project's `test-deps` rows join the graph for `test`, `fetch`, and the test
+packages `check` checks, and never for `build` or `run`; a dependency's own
+`test-deps` never join it
 ([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
 
 - **Sources.** Each version of each package is cloned at its tag into the
@@ -247,7 +258,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 
 | Command | Does |
 |---|---|
-| `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from`. For a library, has `zanec` write the `!`-prefixed objects for each target, packs one archive per target, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
+| `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has `zanec` write their `!`-prefixed objects for each target, packs one archive per target, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
 | `zane toolchain use <tag>` | Changes `zane-version` and the `zane` lock row together. |
@@ -282,29 +293,40 @@ its record alone; the compiler is never asked what it is.
 
 ## 5. What `zane` needs from `zanec`
 
-A package's name is its manifest's `name`
-([`packages.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#21-the-manifest-names-the-package)),
-which only `zane` reads, so the contract is:
+A library package is named by its path within its project's `lib/`, and
+which packages each package may import follows from where it lies
+([`packages.md` §2.2 and §4.3](https://github.com/zane-lang/spec/blob/main/spec/packages.md#43-which-packages-a-package-may-import)),
+which only `zane` reads off the directories, so the contract is:
 
-- **`--package NAME=DIR`** names a package explicitly, and
-  **`--package STAMPNAME=DIR`** gives it its stamp as well: the pinned tag,
+- **`--package PATH=DIR`** names a package by its path, `gui.opengl` for a
+  subpackage, whose last part is the name its files declare, and
+  **`--package STAMPPATH=DIR`** gives it its stamp as well: the pinned tag,
   `%`, the identity hash of its URL and `%`
   ([`dependencies.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#61-placeholder-prefix-rewriting)).
-  A package with a stamp is known by its stamped name, so each version of a
-  package is a package of its own. The first `--package` is the root.
-- **`--import PACKAGE:KEY=PACKAGE`** says which package each of a package's
-  import keys names, each package named as `--package` names it.
-- **`--kind application|library`** for the root. An application without `main`
-  is a compile-time error
+  A package with a stamp is known by its stamped path, so each version of a
+  project is a set of packages of its own. The first `--package` comes first:
+  the program or test package being built, or the first library package of a
+  library build.
+- **`--import PACKAGE:KEY=PACKAGE`** gives a package each package it may
+  import, by the key it imports it by, its name, each package named as
+  `--package` names it. Once any `--import` is given, a package imports
+  through its keys alone, so an import the rules forbid is the compiler's
+  error. A build whose packages import nothing gives the first package its
+  own name as its key, so the rule still holds.
+- **`--kind application|library`**. An application's first package is the
+  root, and one without `main` is a compile-time error
   ([`packages.md` §6.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#62-main-is-the-entry-point)).
+  A library build has no root, so none of its packages reaches `@program$`.
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
   `T` is spelled as `zig cc` reads it; the compiler hands LLVM its normal
   form and the C compiler the triple as written.
 - A stamped dependency arrives as objects of its own, so the compiler emits
   nothing it declares. **`--link FILE`** adds one of them to `--build`'s
   link.
-- **`--object OUT`** writes the root library's own object, every symbol it
-  defines under the `!` placeholder, or under its stamp when it has one.
+- **`--object OUT`** writes the object of every library package of the
+  project being compiled, the packages that share the first one's stamp,
+  every symbol they define under the `!` placeholder, or under their stamp
+  when they have one.
   `zane release` packs the first (§4), and a dependency compiled from source
   or a path is the second (§3.1).
 - **`--rewrite STAMP INPUT OUTPUT`** writes the object `INPUT` with every `!`
@@ -319,29 +341,17 @@ which only `zane` reads, so the contract is:
 `zanec` has `--check`, `--build` and `--target` since
 zane-lang/compiler#147, `--optimize` since #148, `--object` since #150,
 `--link` since #151, `--rewrite` since #152 for ELF and #153 for Mach-O and
-COFF, and stamped `--package` names, `--import` and `--remap` since #156.
+COFF, stamped `--package` names, `--import` and `--remap` since #156, and
+package paths, `_`-prefixed names, rootless library builds and imports
+through keys alone since the compiler's layout change.
 
-A `.zn` file in a subdirectory of `src/` is an error. `zane` reports it before
-calling the compiler, since it is the one listing the files.
-
-A test build needs no flag of its own. `zane` passes the test package first,
-as `--package test=test/`, so it is the root, then the library unstamped, as
-`--package NAME=src/`, which the compiler builds in the same compilation as
-the root
-([compiler `separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md) C1).
-The root is given `--kind application`, so a test package without `main` is
-the compile-time error the spec requires. `--import test:NAME=NAME` joins the
-two, and the test package's other keys come from `deps` and `test-deps`, the
-library's from `deps` alone, so an import of a `test-deps` key in `src/` names
-no package. `zane` reports the rest of
-[`packages.md` §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#7-the-test-package)
-before calling the compiler, as it does for `src/`: a `.zn` file in a
-subdirectory of `test/` or in an application's `test/`, a key equal to the
-library's name, and a manifest named `test`, using `test` as a key, or holding
-`test-deps` in an application.
-
-The full contract is written down in the compiler repository, beside the flags
-it describes.
+`zane` passes each build its packages in this order: the first package, the
+project's library packages, then every version its graph links, each with its
+library packages. A program's build gives the program package the project's
+top-level library packages and its dependencies' public ones; a test
+package's adds those of `test-deps`, and for a nested test package the
+subpackage it tests
+([`packages.md` §7.3](https://github.com/zane-lang/spec/blob/main/spec/packages.md#73-a-test-package-stands-where-its-packages-user-stands)).
 
 ---
 
@@ -355,8 +365,10 @@ it describes.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
 4. **Toolchains.** `toolchain install [tag]` is implemented; `toolchain use`
    remains to come.
-5. **Tests.** `test`, the `test-deps` block, `add --test`, `tree --test`, and
-   the test package `init` writes for a library (§2.5). Built.
+5. **Layout and tests.** The `lib/`, `bin/` and `test/` layout with
+   subpackages, programs per directory of `bin/`, `test`, the `test-deps`
+   block, `add --test`, `tree --test`, and the packages `init` writes (§2.5).
+   Built.
 
 `zane` runs the first compiler it finds of: the one `ZANE_COMPILER` names, the
 toolchain installed for the project's `zane-version` (§4.1), and `zanec` on
