@@ -166,8 +166,8 @@ Deletes `out/`.
 
 ## 3. Dependency commands
 
-These are the only commands that write `zane.coda` and `zane-lock.coda`, and
-they always change the two files together
+These and `zane toolchain update` (§4) are the only commands that write
+`zane.coda` and `zane-lock.coda`, and they always change the two files together
 ([`dependencies.md` §2.3](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#23-files-are-recorded-and-updated-by-commands)).
 
 | Command | Does |
@@ -261,7 +261,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has `zanec` write their `!`-prefixed objects for each target, packs one archive per target, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
-| `zane toolchain use <tag>` | Changes `zane-version` and the `zane` lock row together. |
+| `zane toolchain update [tag] [--accept-tag-move]` | Installs the latest published compiler release, or the tag named, as `install` does, then moves the project's compiler pin to it: `zane-version` and the `zane` lock row's commit together. Fetches the project's graph for the host with that compiler first, as `update` does (§3), so a pin the project cannot build with is refused and nothing is written. A tag that now points to another commit than the lock row pins has moved, and is refused with a security error without the flag. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed: the one program, or the one named when there are several. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
@@ -363,8 +363,8 @@ subpackage it tests
 2. **Dependencies.** `add`, `remove`, `update`, `dev`, `remap`, `fetch`,
    `tree`, and the cache (§3, §3.1). Built.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
-4. **Toolchains.** `toolchain install [tag]` is implemented; `toolchain use`
-   remains to come.
+4. **Toolchains.** `toolchain install [tag]` and `toolchain update [tag]`.
+   Built.
 5. **Layout and tests.** The `lib/`, `bin/` and `test/` layout with
    subpackages, programs per directory of `bin/`, `test`, the `test-deps`
    block, `add --test`, `tree --test`, and the packages `init` writes (§2.5).

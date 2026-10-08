@@ -97,6 +97,35 @@ private def toolchain_command(args : Array(String)) : {Int32, String, String}
   {status, output.to_s, error.to_s}
 end
 
+# A project in *registry*'s directory pinned to the compiler *tag* at
+# *commit*, with the `deps` rows and lock rows given.
+private def toolchain_project(registry : ToolchainRegistry, tag : String, commit : String,
+                              deps = "", rows = "") : Path
+  project = registry.dir / "project"
+  Dir.mkdir_p(project / "bin" / "app")
+  File.write(project / "bin" / "app" / "main.zn", "package app;\n")
+  File.write(project / "zane.coda", "zane-version #{tag}\nversion-pattern v*.+.++\n\ndeps [\n    key version from\n#{deps}]\n")
+  File.write(project / "zane-lock.coda", "resolutions [\n    key url commit\n    zane #{Zane::CompilerRelease::URL} #{commit}\n#{rows}]\n")
+  project
+end
+
+private def toolchain_update(project : Path, *args, compiler : String? = nil) : {Int32, String, String}
+  list = [] of String
+  args.each { |a| list << a }
+  output, error = IO::Memory.new, IO::Memory.new
+  saved = ENV["ZANE_COMPILER"]?
+  compiler ? (ENV["ZANE_COMPILER"] = compiler) : ENV.delete("ZANE_COMPILER")
+  status = begin
+    Zane::Commands::ToolchainUpdate.new(list, output, error, project).run
+  rescue e : Zane::UserError
+    error.puts e.message
+    1
+  ensure
+    saved ? (ENV["ZANE_COMPILER"] = saved) : ENV.delete("ZANE_COMPILER")
+  end
+  {status, output.to_s, error.to_s}
+end
+
 describe Zane::Toolchain do
   it "installs latest outside a project and makes it discoverable by the compiler locator" do
     with_toolchains do |registry|
@@ -282,4 +311,97 @@ describe Zane::Toolchain do
       end
     end
   {% end %}
+
+  describe "update" do
+    it "installs the latest release and pins the project to it in both files" do
+      with_toolchains do |registry|
+        registry.publish("v1.0")
+        registry.publish("v3.0", "b" * 40)
+        project = toolchain_project(registry, "v1.0", "a" * 40)
+        status, output, _ = toolchain_update(project)
+        status.should eq 0
+        output.should eq "Updated zane v1.0 -> v3.0 (commit #{"b" * 12}).\n"
+        File.read(project / "zane.coda").should start_with "zane-version v3.0\nversion-pattern v*.+.++\n"
+        read_coda(project / "zane-lock.coda")["resolutions"].should eq({
+          "columns" => ["url", "commit"],
+          "rows"    => {"zane" => {"url" => Zane::CompilerRelease::URL, "commit" => "b" * 40}},
+        })
+        Zane::CompilerRelease.installed(Zane::Home.toolchains).should eq({"v3.0" => "b" * 40})
+      end
+    end
+
+    it "moves to the version named, older ones included" do
+      with_toolchains do |registry|
+        registry.publish("v1.0")
+        registry.publish("v3.0", "b" * 40)
+        project = toolchain_project(registry, "v3.0", "b" * 40)
+        toolchain_update(project, "v1.0")[0].should eq 0
+        Zane::Manifest.load(project).zane_version.should eq "v1.0"
+        Zane::Manifest.load(project).resolutions["zane"].commit.should eq "a" * 40
+        Zane::CompilerRelease.installed(Zane::Home.toolchains).keys.should eq ["v1.0"]
+      end
+    end
+
+    it "installs the pinned release and writes nothing when the project already uses it" do
+      with_toolchains do |registry|
+        registry.publish("v1.0")
+        project = toolchain_project(registry, "v1.0", "a" * 12)
+        before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}
+        status, output, _ = toolchain_update(project)
+        status.should eq 0
+        output.should contain "nothing changed"
+        {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
+        Zane::CompilerRelease.installed(Zane::Home.toolchains).keys.should eq ["v1.0"]
+      end
+    end
+
+    it "refuses a moved compiler tag before downloading it, unless told to trust it" do
+      with_toolchains do |registry|
+        registry.publish("v1.0")
+        project = toolchain_project(registry, "v1.0", "c" * 40)
+        before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}
+        status, _, error = toolchain_update(project, "v1.0")
+        status.should eq 1
+        error.should contain "security error"
+        error.should contain "--accept-tag-move"
+        registry.fetched.should eq ["#{Zane::Toolchain::API}/tags/v1.0"]
+        Dir.children(Zane::Home.toolchains).should be_empty
+        {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
+
+        toolchain_update(project, "v1.0", "--accept-tag-move")[0].should eq 0
+        Zane::Manifest.load(project).resolutions["zane"].commit.should eq "a" * 40
+      end
+    end
+
+    it "builds the dependencies with the new compiler, and writes nothing when they fail" do
+      with_toolchains do |registry|
+        registry.publish("v3.0", "b" * 40)
+        library = registry.dir / "library"
+        Dir.mkdir_p(library / "lib" / "library")
+        File.write(library / "lib" / "library" / "library.zn", "package library;\n")
+        File.write(library / "zane.coda", "zane-version v1.0\nversion-pattern v*.+.++\n")
+        File.write(library / "zane-lock.coda", "resolutions [\n    key url commit\n    zane #{Zane::CompilerRelease::URL} #{"a" * 40}\n]\n")
+        project = toolchain_project(registry, "v1.0", "a" * 40, "    library v0.1 ../library\n",
+          "    library https://example.com/library #{"d" * 40}\n")
+        before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}
+        # A compiler named by ZANE_COMPILER is not the release being moved
+        # to, so the new release is the one the dependencies are built with.
+        status, _, error = toolchain_update(project, compiler: (library / "zane.coda").to_s)
+        status.should eq 1
+        error.should contain (Zane::Home.toolchains / "v3.0").to_s
+        {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
+      end
+    end
+
+    it "needs a project, and takes one version at most" do
+      with_toolchains do |registry|
+        registry.publish("v1.0")
+        toolchain_update(registry.dir)[2].should contain "no zane.coda"
+        project = toolchain_project(registry, "v1.0", "a" * 40)
+        toolchain_update(project, "v1.0", "v3.0")[0].should eq 1
+        toolchain_update(project, "v1.0.0")[0].should eq 1
+        registry.fetched.should be_empty
+      end
+    end
+  end
 end
