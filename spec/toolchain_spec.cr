@@ -109,12 +109,12 @@ private def toolchain_project(registry : ToolchainRegistry, tag : String, commit
   project
 end
 
-private def toolchain_update(project : Path, *args) : {Int32, String, String}
+private def toolchain_update(project : Path, *args, compiler : String? = nil) : {Int32, String, String}
   list = [] of String
   args.each { |a| list << a }
   output, error = IO::Memory.new, IO::Memory.new
   saved = ENV["ZANE_COMPILER"]?
-  ENV.delete("ZANE_COMPILER")
+  compiler ? (ENV["ZANE_COMPILER"] = compiler) : ENV.delete("ZANE_COMPILER")
   status = begin
     Zane::Commands::ToolchainUpdate.new(list, output, error, project).run
   rescue e : Zane::UserError
@@ -373,7 +373,7 @@ describe Zane::Toolchain do
       end
     end
 
-    it "writes nothing when the project cannot be built with the new compiler" do
+    it "builds the dependencies with the new compiler, and writes nothing when they fail" do
       with_toolchains do |registry|
         registry.publish("v3.0", "b" * 40)
         library = registry.dir / "library"
@@ -384,7 +384,9 @@ describe Zane::Toolchain do
         project = toolchain_project(registry, "v1.0", "a" * 40, "    library v0.1 ../library\n",
           "    library https://example.com/library #{"d" * 40}\n")
         before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}
-        status, _, error = toolchain_update(project)
+        # A compiler named by ZANE_COMPILER is not the release being moved
+        # to, so the new release is the one the dependencies are built with.
+        status, _, error = toolchain_update(project, compiler: (library / "zane.coda").to_s)
         status.should eq 1
         error.should contain (Zane::Home.toolchains / "v3.0").to_s
         {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before

@@ -52,7 +52,10 @@ module Zane::Commands
         return 0
       end
 
-      fetch(ws.manifest.with_compiler(release.tag, release.commit))
+      # The release just installed, never `ZANE_COMPILER` or one on PATH: the
+      # objects are cached under its pin, and the pin is what gets written.
+      installed = Compiler.new((@toolchains / release.tag / "bin" / Compiler::EXECUTABLE).to_s)
+      fetch(ws.manifest.with_compiler(release.tag, release.commit), installed)
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) { doc.root["zane-version"] = release.tag; nil },
         ->(doc : Coda::Doc) {

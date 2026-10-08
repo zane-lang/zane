@@ -51,12 +51,12 @@ module Zane::Commands
     end
 
     # Fetches the whole graph of *manifest* for the host, its `test-deps`
-    # included, with the compiler *manifest* names, so that a change which
-    # leaves the project or its tests unable to build is refused before
-    # either file is written.
-    private def fetch(manifest : Manifest) : Graph
+    # included, with *compiler*, or else the one *manifest* names, so that a
+    # change which leaves the project or its tests unable to build is refused
+    # before either file is written.
+    private def fetch(manifest : Manifest, compiler : Compiler? = nil) : Graph
       graph = Graph.new(Workspace.new(manifest), workspace.layout, test: true)
-      graph.objects(Target::HOST, Compiler.locate(manifest.zane_version.not_nil!, @toolchains))
+      graph.objects(Target::HOST, compiler || Compiler.locate(manifest.zane_version.not_nil!, @toolchains))
       Commands.report(graph, @error)
       graph
     end
