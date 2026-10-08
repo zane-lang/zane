@@ -1,4 +1,5 @@
 require "./coda"
+require "./compiler_release"
 require "./errors"
 require "./project"
 
@@ -175,6 +176,14 @@ module Zane
         deps = deps.any? { |d| d.key == dep.key } ? deps.map { |d| d.key == dep.key ? dep : d } : deps + [dep]
       end
       Manifest.new(@root, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions)
+    end
+
+    # The manifest built by the compiler release *tag*, its lock row pinning
+    # *commit* (§14).
+    def with_compiler(tag : String, commit : String) : Manifest
+      resolutions = @resolutions.dup
+      resolutions[COMPILER_KEY] = Resolution.new(CompilerRelease::URL, commit)
+      Manifest.new(@root, tag, @version_pattern, @deps, @test_deps, @remaps, resolutions)
     end
 
     # Every dependency: the `deps` rows, then the `test-deps` rows.

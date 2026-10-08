@@ -64,6 +64,18 @@ installing a newer compiler does not update that field. `zane init` uses the
 newest installed compiler, and `zane check`, `build`, `run` and `test` find it
 automatically. No extra `PATH` setup is needed for the compiler.
 
+To move a project to another compiler, run `zane toolchain update` in it,
+with a version to choose one rather than the latest:
+
+```sh
+zane toolchain update
+zane toolchain update v3.0
+```
+
+It installs that compiler when it is missing, checks the project's
+dependencies build with it, and then writes the version into `zane.coda` and
+its commit into `zane-lock.coda`.
+
 The compiler release workflow currently provides **Linux x86_64** archives,
 including LLVM libraries and Zig for building Linux and Windows programs.
 Other CLI host platforms report a missing compiler archive until native

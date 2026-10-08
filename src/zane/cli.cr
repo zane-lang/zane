@@ -32,6 +32,7 @@ module Zane::CLI
       tree [--test]          show the packages the project, or its test build, depends on
       cache list|path|clean  show, locate or empty the package cache
       toolchain install [version]  install the latest compiler release, or the version named
+      toolchain update [version]   install it, and build the project with it from now on
       help                   show this text
       version                show the version of zane
 

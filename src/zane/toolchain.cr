@@ -23,9 +23,11 @@ module Zane::Toolchain
   end
 
   # Uses the latest published release by default, even when an older compiler
-  # is installed or the current project pins another version.
+  # is installed or the current project pins another version. *vet* sees the
+  # release and the commit its tag points to before anything is downloaded,
+  # and refuses it by raising.
   def self.install(tag : String? = nil, dir : Path = Home.toolchains,
-                   platform : String = host) : CompilerRelease
+                   platform : String = host, vet : (CompilerRelease -> Nil)? = nil) : CompilerRelease
     staging_created = false
     validate_tag(tag) if tag
     Dir.mkdir_p(dir)
@@ -48,6 +50,7 @@ module Zane::Toolchain
                           "choose a release with that host platform, or build zanec from source")
     end
     compiler = resolve.call(published_tag)
+    vet.try &.call(compiler)
     destination = dir / published_tag
     if File.exists?(destination) || File.symlink?(destination)
       unless File.symlink?(destination) || !executable?(destination / "bin" / Compiler::EXECUTABLE) ||
