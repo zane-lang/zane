@@ -107,13 +107,25 @@ module Zane::Commands
       keyed(["--kind", "library"] + library_flags(graph), first.path, first.name)
     end
 
+    # How much memory each thread of execution's nested scopes may take, as
+    # the project's own manifest sets it, for the programs it builds (spec
+    # memory.md §3.7). Only a field the manifest gives is passed, so a
+    # project that sets neither builds with any compiler.
+    private def region_flags : Array(String)
+      flags = [] of String
+      m = workspace.manifest
+      m.fixed_region.try { |bytes| flags.push("--fixed-region", bytes.to_s) }
+      m.spawned_fixed_region.try { |bytes| flags.push("--spawned-fixed-region", bytes.to_s) }
+      flags
+    end
+
     # A program's build: the program package first, the root, with the
     # project's top-level library packages and its dependencies' public
     # packages to import.
     private def program_build(program : Layout::Program) : Array(String)
       g = graph
       own = layout.program_keys.map { |key, target| {key, target.path} }
-      flags = ["--kind", "application", "--package", "#{program.name}=#{program.dir}"] + library_flags(g) +
+      flags = ["--kind", "application"] + region_flags + ["--package", "#{program.name}=#{program.dir}"] + library_flags(g) +
               g.keyed(program.name, own + g.public_keys(g.direct))
       keyed(flags, program.name, program.name)
     end
@@ -124,7 +136,7 @@ module Zane::Commands
     private def test_build(test : Layout::Test) : Array(String)
       g = test_graph
       own = layout.test_keys(test).map { |key, target| {key, target.path} }
-      flags = ["--kind", "application", "--package", "#{Project::TEST_PACKAGE}=#{test.dir}"] + library_flags(g) +
+      flags = ["--kind", "application"] + region_flags + ["--package", "#{Project::TEST_PACKAGE}=#{test.dir}"] + library_flags(g) +
               g.keyed(Project::TEST_PACKAGE, own + g.public_keys(g.direct + g.test_direct))
       keyed(flags, Project::TEST_PACKAGE, Project::TEST_PACKAGE)
     end

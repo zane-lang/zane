@@ -133,6 +133,14 @@ stops the build with an error that names it and suggests `from source`. A
 project with no program package is refused: its library packages are checked
 with `check` and published with `release`.
 
+The project's `fixed-region` and `spawned-fixed-region`, when its manifest
+gives them, set how much memory each thread of execution's nested scopes may
+take, in every program and test package it builds
+([`memory.md` §3.7](https://github.com/zane-lang/spec/blob/main/spec/memory.md#37-nested-scopes-share-a-bounded-fixed-size-region)).
+`zane` checks that each is a whole number of `MiB` or `GiB` and passes it in
+bytes (§5). A dependency's manifest has no say in either
+([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
+
 ### 2.4 `zane run [PROGRAM] [-- ARGS]`
 
 Builds a program package for the host into `out/run/<name>`, then runs it with
@@ -317,6 +325,11 @@ which only `zane` reads off the directories, so the contract is:
   root, and one without `main` is a compile-time error
   ([`packages.md` §6.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#62-main-is-the-entry-point)).
   A library build has no root, so none of its packages reaches `@program$`.
+- **`--fixed-region BYTES`** and **`--spawned-fixed-region BYTES`**: the
+  size of the main thread of execution's range of frames and of each
+  spawned call's, each a whole number of MiB. `zane` passes them only for a
+  manifest that sets them, so a project that sets neither builds with a
+  compiler that predates them.
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
   `T` is spelled as `zig cc` reads it; the compiler hands LLVM its normal
   form and the C compiler the triple as written.
@@ -343,7 +356,8 @@ zane-lang/compiler#147, `--optimize` since #148, `--object` since #150,
 `--link` since #151, `--rewrite` since #152 for ELF and #153 for Mach-O and
 COFF, stamped `--package` names, `--import` and `--remap` since #156, and
 package paths, `_`-prefixed names, rootless library builds and imports
-through keys alone since #188.
+through keys alone since #188, and `--fixed-region` and
+`--spawned-fixed-region` with the frames of #220.
 
 `zane` passes each build its packages in this order: the first package, the
 project's library packages, then every version its graph links, each with its

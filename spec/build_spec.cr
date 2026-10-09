@@ -15,12 +15,13 @@ EXE = {{ flag?(:win32) ? ".exe" : "" }}
 
 # A project of one program, bin/demo/, unless *files* lays out others: each
 # a path from the root and what the file holds.
-private def with_project(files = {"bin/demo/main.zn" => "package demo;\n"}, deps = "", &)
+private def with_project(files = {"bin/demo/main.zn" => "package demo;\n"}, deps = "", fields = "", &)
   root = Path[File.join(Dir.tempdir, "zane-spec-#{Random::Secure.hex(6)}")]
   Dir.mkdir_p(root)
   File.write(root / "zane.coda", <<-CODA)
     zane-version v0.1
     version-pattern v*.+.++
+    #{fields}
 
     deps [
         key version from
@@ -270,6 +271,30 @@ describe Zane::Commands do
       logged(log).last.should start_with "--build #{root / "elsewhere" / "prog"} --optimize --kind application --package tool="
       expect_raises(Zane::UserError, "bin/nope/ is no program; the programs are demo, tool") do
         zane(Zane::Commands::Build, ["nope"], root)
+      end
+    end
+  end
+
+  it "passes the manifest's region sizes to each program's and test package's build, and only those it gives" do
+    files = {"lib/math/math.zn" => "package math;\n", "bin/demo/main.zn" => "package demo;\n", "test/math/main.zn" => "package test;\n"}
+    with_project(files, fields: "fixed-region 1GiB\nspawned-fixed-region 16MiB") do |root, log|
+      zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
+      zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
+      regions = "--kind application --fixed-region 1073741824 --spawned-fixed-region 16777216 --package"
+      logged(log).map { |line| line.includes?(regions) }.should eq [true, true]
+    end
+    with_project(files, fields: "spawned-fixed-region 2MiB") do |root, log|
+      zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
+      logged(log).first.should contain "--kind application --spawned-fixed-region 2097152 --package demo="
+    end
+  end
+
+  it "refuses a region size that is not a whole number of MiB or GiB" do
+    ["256", "0MiB", "1.5GiB", "256mib", "9999999999999GiB"].each do |size|
+      with_project(fields: "fixed-region #{size}") do |root|
+        expect_raises(Zane::UserError, "`fixed-region` is `#{size}`") do
+          zane(Zane::Commands::Build, [] of String, root)
+        end
       end
     end
   end

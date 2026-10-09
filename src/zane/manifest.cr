@@ -41,6 +41,13 @@ module Zane
     DEPS      = "deps"
     TEST_DEPS = "test-deps"
 
+    # How much memory the fixed-size regions of nested scopes may take, in
+    # the program's own thread of execution and in each spawned call's
+    # (spec memory.md §3.7): a whole number of MiB or GiB.
+    FIXED_REGION         = "fixed-region"
+    SPAWNED_FIXED_REGION = "spawned-fixed-region"
+    REGION_SIZE          = /\A([1-9][0-9]*)(MiB|GiB)\z/
+
     # A commit hash, whole or abbreviated.
     COMMIT = /\A[0-9a-f]{7,64}\z/
 
@@ -53,8 +60,12 @@ module Zane
     getter test_deps : Array(Dependency)
     getter remaps : Array(String)
     getter resolutions : Hash(String, Resolution)
+    # Each in bytes, or nil when the manifest leaves it to the compiler.
+    getter fixed_region : Int64?
+    getter spawned_fixed_region : Int64?
 
-    def initialize(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions)
+    def initialize(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions,
+                   @fixed_region = nil, @spawned_fixed_region = nil)
     end
 
     def self.path?(from : String) : Bool
@@ -83,7 +94,24 @@ module Zane
       if both = test_deps.find { |t| deps.any? { |d| d.key == t.key } }
         raise UserError.new("#{path}: `#{both.key}` is in both `#{DEPS}` and `#{TEST_DEPS}`")
       end
-      new(root, zane_version, pattern, deps, test_deps, read_remaps(doc, path), read_lock(root))
+      new(root, zane_version, pattern, deps, test_deps, read_remaps(doc, path), read_lock(root),
+        read_region(doc, path, FIXED_REGION), read_region(doc, path, SPAWNED_FIXED_REGION))
+    end
+
+    # A region size in bytes, or nil when the field is absent.
+    private def self.read_region(doc : Coda::Block, path : Path, key : String) : Int64?
+      return nil unless doc.has_key?(key)
+      value = field(doc, key, path)
+      match = REGION_SIZE.match(value)
+      count = match.try(&.[1].to_i64?)
+      unless match && count
+        raise UserError.new("#{path}: `#{key}` is `#{value}`; it is a whole number of `MiB` or `GiB`, such as `256MiB`")
+      end
+      unit = match[2] == "GiB" ? 1_i64 << 30 : 1_i64 << 20
+      if count > Int64::MAX // unit
+        raise UserError.new("#{path}: `#{key}` is `#{value}`, more memory than a program can reserve")
+      end
+      count * unit
     end
 
     private def self.field(doc : Coda::Block, key : String, path : Path) : String
@@ -175,7 +203,8 @@ module Zane
       else
         deps = deps.any? { |d| d.key == dep.key } ? deps.map { |d| d.key == dep.key ? dep : d } : deps + [dep]
       end
-      Manifest.new(@root, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions)
+      Manifest.new(@root, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions,
+        @fixed_region, @spawned_fixed_region)
     end
 
     # The manifest built by the compiler release *tag*, its lock row pinning
@@ -183,7 +212,8 @@ module Zane
     def with_compiler(tag : String, commit : String) : Manifest
       resolutions = @resolutions.dup
       resolutions[COMPILER_KEY] = Resolution.new(CompilerRelease::URL, commit)
-      Manifest.new(@root, tag, @version_pattern, @deps, @test_deps, @remaps, resolutions)
+      Manifest.new(@root, tag, @version_pattern, @deps, @test_deps, @remaps, resolutions,
+        @fixed_region, @spawned_fixed_region)
     end
 
     # Every dependency: the `deps` rows, then the `test-deps` rows.
