@@ -137,8 +137,10 @@ The project's `fixed-region` and `spawned-fixed-region`, when its manifest
 gives them, set how much memory each thread of execution's nested scopes may
 take, in every program and test package it builds
 ([`memory.md` §3.7](https://github.com/zane-lang/spec/blob/main/spec/memory.md#37-nested-scopes-share-a-bounded-fixed-size-region)).
-`zane` checks that each is a whole number of `MiB` or `GiB`, at most `32GiB`,
-and passes it in bytes (§5). A dependency's manifest has no say in either
+`zane` checks that each is a positive whole number of `MiB` or `GiB` whose
+byte count fits its `Int64` representation, and passes it in bytes (§5).
+There is no `32GiB` cap: native addresses let the runtime reserve whatever
+range the target system permits. A dependency's manifest has no say in either
 ([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
 
 ### 2.4 `zane run [PROGRAM] [-- ARGS]`

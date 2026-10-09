@@ -303,15 +303,32 @@ describe Zane::Commands do
     end
   end
 
-  it "takes a region size up to 32GiB and refuses a larger one" do
-    with_project(fields: "fixed-region 32GiB\nspawned-fixed-region 32768MiB") do |root, log|
+  it "passes region sizes above 32GiB without a segmented-offset cap" do
+    files = {"bin/demo/main.zn" => "package demo;\n", "test/demo/main.zn" => "package test;\n"}
+    with_project(files, fields: "fixed-region 64GiB\nspawned-fixed-region 32769MiB") do |root, log|
       zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
-      logged(log).first.should contain "--fixed-region 34359738368 --spawned-fixed-region 34359738368 "
+      zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
+      logged(log).each do |line|
+        line.should contain "--fixed-region 68719476736 --spawned-fixed-region 34360786944 "
+      end
     end
-    ["33GiB", "32769MiB", "9999999999999GiB"].each do |size|
-      with_project(fields: "spawned-fixed-region #{size}") do |root|
-        expect_raises(Zane::UserError, "`spawned-fixed-region` is `#{size}`; it is at most `32GiB`") do
-          zane(Zane::Commands::Build, [] of String, root)
+  end
+
+  it "keeps the largest whole-unit byte counts representable by the manifest" do
+    with_project(fields: "fixed-region 8589934591GiB\nspawned-fixed-region 8796093022207MiB") do |root|
+      manifest = Zane::Manifest.load(root)
+      manifest.fixed_region.should eq 9223372035781033984_i64
+      manifest.spawned_fixed_region.should eq 9223372036853727232_i64
+    end
+  end
+
+  it "checks byte-count overflow for either region field" do
+    ["fixed-region", "spawned-fixed-region"].each do |field|
+      ["8589934592GiB", "8796093022208MiB"].each do |size|
+        with_project(fields: "#{field} #{size}") do |root|
+          expect_raises(Zane::UserError, "`#{field}` is `#{size}`; it is too large to represent in bytes") do
+            zane(Zane::Commands::Build, [] of String, root)
+          end
         end
       end
     end
