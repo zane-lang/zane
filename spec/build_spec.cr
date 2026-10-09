@@ -15,12 +15,13 @@ EXE = {{ flag?(:win32) ? ".exe" : "" }}
 
 # A project of one program, bin/demo/, unless *files* lays out others: each
 # a path from the root and what the file holds.
-private def with_project(files = {"bin/demo/main.zn" => "package demo;\n"}, deps = "", &)
+private def with_project(files = {"bin/demo/main.zn" => "package demo;\n"}, deps = "", fields = "", &)
   root = Path[File.join(Dir.tempdir, "zane-spec-#{Random::Secure.hex(6)}")]
   Dir.mkdir_p(root)
   File.write(root / "zane.coda", <<-CODA)
     zane-version v0.1
     version-pattern v*.+.++
+    #{fields}
 
     deps [
         key version from
@@ -270,6 +271,86 @@ describe Zane::Commands do
       logged(log).last.should start_with "--build #{root / "elsewhere" / "prog"} --optimize --kind application --package tool="
       expect_raises(Zane::UserError, "bin/nope/ is no program; the programs are demo, tool") do
         zane(Zane::Commands::Build, ["nope"], root)
+      end
+    end
+  end
+
+  it "passes the manifest's region sizes to each program's and test package's build, and only those it gives" do
+    files = {"lib/math/math.zn" => "package math;\n", "bin/demo/main.zn" => "package demo;\n", "test/math/main.zn" => "package test;\n"}
+    with_project(files, fields: "fixed-region 1GiB\nspawned-fixed-region 16MiB") do |root, log|
+      zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
+      zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
+      regions = "--kind application --fixed-region 1073741824 --spawned-fixed-region 16777216 --package"
+      build, test = logged(log)
+      build.should start_with "--build #{root / "out" / "host" / "demo#{EXE}"} "
+      build.should contain regions
+      test.should start_with "--build #{root / "out" / "test"}"
+      test.should contain regions
+    end
+    with_project(files, fields: "spawned-fixed-region 2MiB") do |root, log|
+      zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
+      logged(log).first.should contain "--kind application --spawned-fixed-region 2097152 --package demo="
+    end
+  end
+
+  it "refuses a region size that is not a positive whole number of MiB or GiB" do
+    ["fixed-region", "spawned-fixed-region"].each do |field|
+      ["256", "0MiB", "00MiB", "000GiB", "1.5GiB", "256mib", "99999999999999999999GiB"].each do |size|
+        with_project(fields: "#{field} #{size}") do |root|
+          expect_raises(Zane::UserError, "`#{field}` is `#{size}`; it is a positive whole number") do
+            zane(Zane::Commands::Build, [] of String, root)
+          end
+        end
+      end
+    end
+  end
+
+  it "accepts leading zeros in positive region counts" do
+    files = {"bin/demo/main.zn" => "package demo;\n", "test/demo/main.zn" => "package test;\n"}
+    with_project(files, fields: "fixed-region 0001MiB\nspawned-fixed-region 0002GiB") do |root, log|
+      zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
+      zane(Zane::Commands::Check, [] of String, root)[0].should eq 0
+      zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
+      lines = logged(log)
+      lines.size.should eq 4
+      build, test = lines.first, lines.last
+      build.should start_with "--build #{root / "out" / "host" / "demo#{EXE}"} "
+      lines[1].should start_with "--check "
+      lines[2].should start_with "--check "
+      test.should start_with "--build #{root / "out" / "test"}"
+      [build, test].each do |line|
+        line.should contain "--fixed-region 1048576 --spawned-fixed-region 2147483648 "
+      end
+    end
+  end
+
+  it "passes region sizes above 32GiB without a segmented-offset cap" do
+    files = {"bin/demo/main.zn" => "package demo;\n", "test/demo/main.zn" => "package test;\n"}
+    with_project(files, fields: "fixed-region 64GiB\nspawned-fixed-region 32769MiB") do |root, log|
+      zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
+      zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
+      logged(log).each do |line|
+        line.should contain "--fixed-region 68719476736 --spawned-fixed-region 34360786944 "
+      end
+    end
+  end
+
+  it "keeps the largest whole-unit byte counts representable by the manifest" do
+    with_project(fields: "fixed-region 8589934591GiB\nspawned-fixed-region 8796093022207MiB") do |root|
+      manifest = Zane::Manifest.load(root)
+      manifest.fixed_region.should eq 9223372035781033984_i64
+      manifest.spawned_fixed_region.should eq 9223372036853727232_i64
+    end
+  end
+
+  it "checks byte-count overflow for either region field" do
+    ["fixed-region", "spawned-fixed-region"].each do |field|
+      ["8589934592GiB", "8796093022208MiB"].each do |size|
+        with_project(fields: "#{field} #{size}") do |root|
+          expect_raises(Zane::UserError, "`#{field}` is `#{size}`; it is too large to represent in bytes") do
+            zane(Zane::Commands::Build, [] of String, root)
+          end
+        end
       end
     end
   end
