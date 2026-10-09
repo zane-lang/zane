@@ -329,7 +329,8 @@ which only `zane` reads off the directories, so the contract is:
   A library build has no root, so none of its packages reaches `@program$`.
 - **`--fixed-region BYTES`** and **`--spawned-fixed-region BYTES`**: the
   size of the main thread of execution's range of frames and of each
-  spawned call's, each a whole number of MiB. `zane` passes them only for a
+  spawned call's, passed in bytes after converting the manifest's whole
+  number of `MiB` or `GiB`. `zane` passes them only for a
   manifest that sets them, so a project that sets neither builds with a
   compiler that predates them.
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.

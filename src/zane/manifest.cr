@@ -47,7 +47,7 @@ module Zane
     # impose no language-wide cap; the runtime must reserve the range.
     FIXED_REGION         = "fixed-region"
     SPAWNED_FIXED_REGION = "spawned-fixed-region"
-    REGION_SIZE          = /\A([1-9][0-9]*)(MiB|GiB)\z/
+    REGION_SIZE          = /\A([0-9]+)(MiB|GiB)\z/
 
     # A commit hash, whole or abbreviated.
     COMMIT = /\A[0-9a-f]{7,64}\z/
@@ -105,8 +105,8 @@ module Zane
       value = field(doc, key, path)
       match = REGION_SIZE.match(value)
       count = match.try(&.[1].to_i64?)
-      unless match && count
-        raise UserError.new("#{path}: `#{key}` is `#{value}`; it is a whole number of `MiB` or `GiB`, such as `256MiB`")
+      unless match && count && count > 0
+        raise UserError.new("#{path}: `#{key}` is `#{value}`; it is a positive whole number of `MiB` or `GiB`, such as `256MiB`")
       end
       unit = match[2] == "GiB" ? 1_i64 << 30 : 1_i64 << 20
       if count > Int64::MAX // unit

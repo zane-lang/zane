@@ -293,12 +293,33 @@ describe Zane::Commands do
     end
   end
 
-  it "refuses a region size that is not a whole number of MiB or GiB" do
-    ["256", "0MiB", "1.5GiB", "256mib", "99999999999999999999GiB"].each do |size|
-      with_project(fields: "fixed-region #{size}") do |root|
-        expect_raises(Zane::UserError, "`fixed-region` is `#{size}`; it is a whole number") do
-          zane(Zane::Commands::Build, [] of String, root)
+  it "refuses a region size that is not a positive whole number of MiB or GiB" do
+    ["fixed-region", "spawned-fixed-region"].each do |field|
+      ["256", "0MiB", "00MiB", "000GiB", "1.5GiB", "256mib", "99999999999999999999GiB"].each do |size|
+        with_project(fields: "#{field} #{size}") do |root|
+          expect_raises(Zane::UserError, "`#{field}` is `#{size}`; it is a positive whole number") do
+            zane(Zane::Commands::Build, [] of String, root)
+          end
         end
+      end
+    end
+  end
+
+  it "accepts leading zeros in positive region counts" do
+    files = {"bin/demo/main.zn" => "package demo;\n", "test/demo/main.zn" => "package test;\n"}
+    with_project(files, fields: "fixed-region 0001MiB\nspawned-fixed-region 0002GiB") do |root, log|
+      zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
+      zane(Zane::Commands::Check, [] of String, root)[0].should eq 0
+      zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
+      lines = logged(log)
+      lines.size.should eq 4
+      build, test = lines.first, lines.last
+      build.should start_with "--build #{root / "out" / "host" / "demo#{EXE}"} "
+      lines[1].should start_with "--check "
+      lines[2].should start_with "--check "
+      test.should start_with "--build #{root / "out" / "test"}"
+      [build, test].each do |line|
+        line.should contain "--fixed-region 1048576 --spawned-fixed-region 2147483648 "
       end
     end
   end
