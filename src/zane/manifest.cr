@@ -43,10 +43,12 @@ module Zane
 
     # How much memory the fixed-size regions of nested scopes may take, in
     # the program's own thread of execution and in each spawned call's
-    # (spec memory.md §3.7): a whole number of MiB or GiB.
+    # (spec memory.md §3.7): a whole number of MiB or GiB, at most the
+    # 32 GiB a segmented offset reaches (memory.md §3.1).
     FIXED_REGION         = "fixed-region"
     SPAWNED_FIXED_REGION = "spawned-fixed-region"
     REGION_SIZE          = /\A([1-9][0-9]*)(MiB|GiB)\z/
+    REGION_LIMIT         = 32_i64 << 30
 
     # A commit hash, whole or abbreviated.
     COMMIT = /\A[0-9a-f]{7,64}\z/
@@ -108,8 +110,8 @@ module Zane
         raise UserError.new("#{path}: `#{key}` is `#{value}`; it is a whole number of `MiB` or `GiB`, such as `256MiB`")
       end
       unit = match[2] == "GiB" ? 1_i64 << 30 : 1_i64 << 20
-      if count > Int64::MAX // unit
-        raise UserError.new("#{path}: `#{key}` is `#{value}`, more memory than a program can reserve")
+      if count > REGION_LIMIT // unit
+        raise UserError.new("#{path}: `#{key}` is `#{value}`; it is at most `32GiB`")
       end
       count * unit
     end

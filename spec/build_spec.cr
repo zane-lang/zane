@@ -281,7 +281,11 @@ describe Zane::Commands do
       zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
       zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
       regions = "--kind application --fixed-region 1073741824 --spawned-fixed-region 16777216 --package"
-      logged(log).map { |line| line.includes?(regions) }.should eq [true, true]
+      build, test = logged(log)
+      build.should start_with "--build #{root / "out" / "host" / "demo#{EXE}"} "
+      build.should contain regions
+      test.should start_with "--build #{root / "out" / "test"}"
+      test.should contain regions
     end
     with_project(files, fields: "spawned-fixed-region 2MiB") do |root, log|
       zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
@@ -290,9 +294,23 @@ describe Zane::Commands do
   end
 
   it "refuses a region size that is not a whole number of MiB or GiB" do
-    ["256", "0MiB", "1.5GiB", "256mib", "9999999999999GiB"].each do |size|
+    ["256", "0MiB", "1.5GiB", "256mib", "99999999999999999999GiB"].each do |size|
       with_project(fields: "fixed-region #{size}") do |root|
-        expect_raises(Zane::UserError, "`fixed-region` is `#{size}`") do
+        expect_raises(Zane::UserError, "`fixed-region` is `#{size}`; it is a whole number") do
+          zane(Zane::Commands::Build, [] of String, root)
+        end
+      end
+    end
+  end
+
+  it "takes a region size up to 32GiB and refuses a larger one" do
+    with_project(fields: "fixed-region 32GiB\nspawned-fixed-region 32768MiB") do |root, log|
+      zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
+      logged(log).first.should contain "--fixed-region 34359738368 --spawned-fixed-region 34359738368 "
+    end
+    ["33GiB", "32769MiB", "9999999999999GiB"].each do |size|
+      with_project(fields: "spawned-fixed-region #{size}") do |root|
+        expect_raises(Zane::UserError, "`spawned-fixed-region` is `#{size}`; it is at most `32GiB`") do
           zane(Zane::Commands::Build, [] of String, root)
         end
       end
