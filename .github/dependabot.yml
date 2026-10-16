@@ -1,0 +1,11 @@
+# Keep GitHub Actions pinned to reviewed commits and update them together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
