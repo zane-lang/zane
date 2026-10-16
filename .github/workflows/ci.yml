@@ -24,10 +24,14 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash test/install.sh
       - run: bash test/release-tag.sh
-      - run: shellcheck install.sh test/install.sh .github/scripts/release-tag.sh test/release-tag.sh
+      - name: Install Devbox tools
+        uses: jetify-com/devbox-install-action@8c6a66ed6273138b1915457069de78cb52fe3bd7 # v0.15.0
+        with:
+          enable-cache: true
+      - run: devbox run -- shellcheck install.sh test/install.sh .github/scripts/release-tag.sh test/release-tag.sh
 
   # Alpine, because only musl links a fully static binary.
   linux:
@@ -36,7 +40,7 @@ jobs:
     container: crystallang/crystal:latest-alpine
     steps:
       - run: apk add --no-cache git just g++ file
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
       - run: just fmt-check
@@ -50,7 +54,7 @@ jobs:
       - name: Check the release version
         if: inputs.version != ''
         run: test "$(build/zane --version)" = "zane $ZANE_CLI_VERSION"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zane-linux-x86_64
           path: build/zane
@@ -59,14 +63,16 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-      - uses: crystal-lang/install-crystal@v1
-      - uses: extractions/setup-just@v2
+      - name: Install Crystal and Just with Devbox
+        uses: jetify-com/devbox-install-action@8c6a66ed6273138b1915457069de78cb52fe3bd7 # v0.15.0
+        with:
+          enable-cache: true
       - run: bash test/install.sh
-      - run: just test
-      - run: just release
+      - run: devbox run -- just test
+      - run: devbox run -- just release
       - name: Check the architecture
         run: test "$(uname -m)" = arm64
       - name: The binary links only system libraries
@@ -77,7 +83,7 @@ jobs:
       - name: Check the release version
         if: inputs.version != ''
         run: test "$(build/zane --version)" = "zane $ZANE_CLI_VERSION"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zane-macos-arm64
           path: build/zane
@@ -89,12 +95,14 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-      - uses: ilammy/msvc-dev-cmd@v1
-      - uses: crystal-lang/install-crystal@v1
-      - uses: extractions/setup-just@v2
+      # Native MSVC/Crystal builds run outside WSL; Devbox/Nix is not a
+      # native Windows toolchain. Keep these platform-specific actions.
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      - uses: crystal-lang/install-crystal@46e48b6238ee23b1a6ef08ec39f12fb234676006 # v1.9.3
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       - name: Test the Windows installer
         shell: pwsh
         run: ./test/install.ps1
@@ -107,7 +115,7 @@ jobs:
       - name: Check the release version
         if: inputs.version != ''
         run: test "$(build/zane.exe --version)" = "zane $ZANE_CLI_VERSION"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zane-windows-x86_64
           path: build/zane.exe
