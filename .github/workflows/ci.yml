@@ -72,7 +72,15 @@ jobs:
           enable-cache: true
       - run: bash test/install.sh
       - run: devbox run -- just test
-      - run: devbox run -- just release
+      # Nix Crystal links macOS outputs to /nix/store libraries. That is fine
+      # for tests, but release binaries must run on Macs without Nix. Use the
+      # native Crystal distribution for only the portable release build.
+      - name: Install native Crystal for the release binary
+        uses: crystal-lang/install-crystal@46e48b6238ee23b1a6ef08ec39f12fb234676006 # v1.9.3
+      - name: Build portable macOS release with Devbox Just
+        run: |
+          just_bin="$(devbox run -- which just)"
+          "$just_bin" release
       - name: Check the architecture
         run: test "$(uname -m)" = arm64
       - name: The binary links only system libraries
