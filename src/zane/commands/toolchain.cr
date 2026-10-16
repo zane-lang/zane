@@ -1,4 +1,5 @@
 require "../toolchain"
+require "../install_progress"
 require "./deps"
 
 module Zane::Commands
@@ -13,7 +14,9 @@ module Zane::Commands
       case @args.first?
       when "install"
         raise UserError.new(USAGE) unless @args.size <= 2
-        release = Zane::Toolchain.install(@args[1]?)
+        release = InstallProgress.run(@error) do |progress|
+          Zane::Toolchain.install(@args[1]?, progress: ->progress.stage(String))
+        end
         @output.puts "Zane toolchain #{release.tag} is installed in #{Home.toolchains / release.tag}."
         0
       when "update"
@@ -45,8 +48,11 @@ module Zane::Commands
     def run : Int32
       ws = workspace
       current, locked = ws.toolchain
-      release = Zane::Toolchain.install(@args[0]?, @toolchains,
-        vet: ->(r : CompilerRelease) { check_tag_move(r, locked) if r.tag == current; nil })
+      release = InstallProgress.run(@error) do |progress|
+        Zane::Toolchain.install(@args[0]?, @toolchains,
+          vet: ->(r : CompilerRelease) { check_tag_move(r, locked) if r.tag == current; nil },
+          progress: ->progress.stage(String))
+      end
       if release.tag == current && same_commit?(release.commit, locked)
         @output.puts "The project is already built by #{current}, which is installed; nothing changed."
         return 0

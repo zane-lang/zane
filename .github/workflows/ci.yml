@@ -45,7 +45,7 @@ jobs:
       - name: The binary links nothing dynamically
         run: |
           file build/zane
-          file build/zane | grep -q 'statically linked'
+          file build/zane | grep -Eq 'statically linked|static-pie linked'
       - run: build/zane --version
       - name: Check the release version
         if: inputs.version != ''

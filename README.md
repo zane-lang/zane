@@ -57,6 +57,8 @@ The version is a compiler tag, independent of the CLI's own version. Omit it
 to use GitHub's latest published compiler release, even if an older toolchain
 is already installed. Installation works outside a project and verifies the
 archive's SHA-256 and its compiler commit before making it available.
+On a terminal, installation shows a spinner with the current stage on stderr;
+redirected output and terminals with `TERM=dumb` keep the usual plain output.
 
 Toolchains live side by side in `~/.zane/toolchains/<version>/`, or under
 `ZANE_HOME`. Projects use the version their `zane-version` field pins;

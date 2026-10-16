@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "./support/terminal"
 
 private def toolchain_archive(entries : Array({String, Char, String, Int32})) : Bytes
   tar = IO::Memory.new
@@ -127,6 +128,36 @@ private def toolchain_update(project : Path, *args, compiler : String? = nil) : 
 end
 
 describe Zane::Toolchain do
+  it "shows installation stages on a terminal and keeps the success message on stdout" do
+    with_toolchains do |registry|
+      registry.publish("v1.0")
+      with_terminal do |terminal|
+        output = IO::Memory.new
+        Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 0
+        ["Looking up", "Resolving", "Downloading checksums", "Downloading compiler",
+         "Verifying", "Extracting", "Checking", "Installing"].each do |stage|
+          terminal.to_s.should contain stage
+        end
+        terminal.to_s.should end_with "\r\e[K"
+        output.to_s.should eq "Zane toolchain v1.0 is installed in #{Zane::Home.toolchains / "v1.0"}.\n"
+      end
+    end
+  end
+
+  it "clears terminal progress before reporting a failed download" do
+    with_toolchains do |registry|
+      registry.publish("v1.0")
+      registry.downloads.delete("#{registry.base("v1.0")}/#{registry.asset("v1.0")}")
+      with_terminal do |terminal|
+        output = IO::Memory.new
+        Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 1
+        terminal.to_s.should contain "\r\e[Kzane: 404"
+        output.to_s.should eq ""
+        Dir.children(Zane::Home.toolchains).should be_empty
+      end
+    end
+  end
+
   it "installs latest outside a project and makes it discoverable by the compiler locator" do
     with_toolchains do |registry|
       registry.publish("v1.0")
@@ -313,6 +344,20 @@ describe Zane::Toolchain do
   {% end %}
 
   describe "update" do
+    it "shows terminal progress while installing the project's new compiler" do
+      with_toolchains do |registry|
+        registry.publish("v3.0", "b" * 40)
+        project = toolchain_project(registry, "v1.0", "a" * 40)
+        with_terminal do |terminal|
+          output = IO::Memory.new
+          Zane::Commands::ToolchainUpdate.new([] of String, output, terminal, project).run.should eq 0
+          terminal.to_s.should contain "Downloading compiler v3.0"
+          terminal.to_s.should end_with "\r\e[K"
+          output.to_s.should contain "Updated zane v1.0 -> v3.0"
+        end
+      end
+    end
+
     it "installs the latest release and pins the project to it in both files" do
       with_toolchains do |registry|
         registry.publish("v1.0")
