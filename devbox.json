@@ -1,8 +1,18 @@
 {
-  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.2/.schema/devbox.schema.json",
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.18.4/.schema/devbox.schema.json",
   "packages": {
-    "crystal": "latest",
-    "just": "latest"
+    "just": "latest",
+    "clang": {
+      "version": "latest",
+      "platforms": [
+        "x86_64-linux",
+        "aarch64-linux"
+      ]
+    },
+    "shellcheck": "latest",
+    "file": "latest",
+    "python3": "latest",
+    "path:./dev/toolchains#crystal": {}
   },
   "shell": {
     "scripts": {
@@ -12,6 +22,9 @@
       "build": [
         "just build"
       ]
-    }
+    },
+    "init_hook": [
+      "if [ \"$(uname -s)\" = Darwin ]; then export CC=/usr/bin/clang CXX=/usr/bin/clang++; fi"
+    ]
   }
 }
