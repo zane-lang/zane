@@ -27,6 +27,12 @@
           '' + (if darwin then ''
             # The official macOS bundle includes static runtime libraries.
             patchShebangs $out/bin
+            substituteInPlace $out/embedded/lib/pkgconfig/*.pc \
+              --replace-fail /opt/crystal/embedded $out/embedded
+            wrapProgram $out/bin/crystal \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.pkg-config ]} \
+              --set PKG_CONFIG_LIBDIR $out/embedded/lib/pkgconfig \
+              --set PKG_CONFIG_PATH $out/embedded/lib/pkgconfig
           '' else ''
             # The Linux compiler is static; programs link Nix libraries locally.
             wrapProgram $out/bin/crystal \

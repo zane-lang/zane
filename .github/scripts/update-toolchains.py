@@ -8,9 +8,11 @@ from urllib.request import Request, urlopen
 
 
 def main():
+    """Refresh stable release pins for the scheduled update pull request."""
     headers = {"User-Agent": "zane-toolchain-updater"}
-    if os.environ.get("GH_TOKEN"):
-        headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = "Bearer " + token
     request = Request("https://api.github.com/repos/crystal-lang/crystal/releases/latest", headers=headers)
     with urlopen(request, timeout=60) as response:
         release = json.load(response)

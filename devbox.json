@@ -24,7 +24,7 @@
       ]
     },
     "init_hook": [
-      "if [ \"$(uname -s)\" = Darwin ]; then export CC=/usr/bin/clang CXX=/usr/bin/clang++; fi"
+      "if [ \"$(uname -s)\" = Darwin ]; then export CC=/usr/bin/clang CXX=/usr/bin/clang++; export SDKROOT=\"$(/usr/bin/xcrun --sdk macosx --show-sdk-path)\"; fi"
     ]
   }
 }
