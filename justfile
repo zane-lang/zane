@@ -1,6 +1,8 @@
 # Recipes for building and testing `zane`. Run them inside `devbox shell`, or
 # with `devbox run -- just <recipe>`.
 
+cxx := env("CXX", "c++")
+
 build_dir := justfile_directory() / "build"
 path_sep := if os_family() == "windows" { ";" } else { ":" }
 
@@ -45,7 +47,7 @@ coda: _submodule
 	lib=build/libcoda_ffi.a
 	if [ -f "$lib" ] && [ -f vendor/coda/ffi/coda_ffi_safe.cpp ] && [ -f vendor/coda/ffi/coda_ffi.cpp ] && [ -z "$(find vendor/coda/src vendor/coda/ffi -newer "$lib" -type f)" ]; then exit 0; fi
 	mkdir -p build
-	c++ -O2 -fPIC -std=c++17 -Ivendor/coda/src -Ivendor/coda/ffi -c vendor/coda/ffi/coda_ffi_safe.cpp -o build/coda_ffi.o
+	{{quote(cxx)}} -O2 -fPIC -std=c++17 -Ivendor/coda/src -Ivendor/coda/ffi -c vendor/coda/ffi/coda_ffi_safe.cpp -o build/coda_ffi.o
 	rm -f "$lib"
 	ar rcs "$lib" build/coda_ffi.o
 

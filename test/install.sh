@@ -54,10 +54,12 @@ expect_failure() {
         exit 1
     fi
     cmp "$scratch/old" "$ZANE_INSTALL_DIR/zane"
-    if compgen -G "$ZANE_INSTALL_DIR/.zane.*" >/dev/null; then
-        echo 'Installer left a staged binary' >&2
-        exit 1
-    fi
+    for staged in "$ZANE_INSTALL_DIR"/.zane.*; do
+        if [ -e "$staged" ] || [ -L "$staged" ]; then
+            echo 'Installer left a staged binary' >&2
+            exit 1
+        fi
+    done
 }
 
 sh "$root/install.sh"
