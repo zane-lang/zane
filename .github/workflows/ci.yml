@@ -117,7 +117,7 @@ jobs:
         with:
           submodules: true
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-      - uses: crystal-lang/install-crystal@46e48b6238ee23b1a6ef08ec39f12fb234676006 # v1.9.3
+      - uses: crystal-lang/install-crystal@19ef8675e43f44f0d38b79f732df7ad4b6b669ed # v1.9.4
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       - name: Test the Windows installer
         shell: pwsh
