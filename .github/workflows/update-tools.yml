@@ -30,7 +30,7 @@ jobs:
         uses: jetify-com/devbox-install-action@8c6a66ed6273138b1915457069de78cb52fe3bd7 # v0.15.0
         with:
           enable-cache: true
-      - name: Refresh the Alpine release builder
+      - name: Refresh the Crystal release pins
         env:
           GH_TOKEN: ${{ github.token }}
         run: devbox run -- python3 .github/scripts/update-toolchains.py
@@ -54,6 +54,5 @@ jobs:
             this PR, because token-created PRs do not start other workflows.
           add-paths: |
             devbox.lock
-            .github/workflows/ci.yml
             dev/toolchains/crystal.json
             dev/toolchains/flake.lock

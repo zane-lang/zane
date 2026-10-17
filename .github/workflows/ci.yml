@@ -33,13 +33,27 @@ jobs:
       - run: devbox run -- bash test/release-tag.sh
       - run: devbox run -- shellcheck install.sh test/install.sh .github/scripts/release-tag.sh test/release-tag.sh
 
-  # Alpine, because only musl links a fully static binary.
-  linux:
+  # The Alpine image uses the Crystal version Devbox pins, so both stay in step.
+  crystal-version:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: dev/toolchains/crystal.json
+          sparse-checkout-cone-mode: false
+      - id: read
+        run: echo "version=$(jq -er '.version | select(test("^[0-9]+[.][0-9]+[.][0-9]+$"))' dev/toolchains/crystal.json)" >> "$GITHUB_OUTPUT"
+
+  # Alpine, because only musl links a fully static binary.
+  linux:
+    needs: crystal-version
+    runs-on: ubuntu-latest
     # Devbox/Nix targets glibc, while this release must remain fully static.
-    # update-tools.yml tracks this explicit stable Crystal image version.
-    container: crystallang/crystal:1.22.0-alpine
+    container: crystallang/crystal:${{ needs.crystal-version.outputs.version }}-alpine
     steps:
       - run: apk add --no-cache git just g++ file
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
