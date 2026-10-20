@@ -420,7 +420,7 @@ describe Zane::Toolchain do
 
     it "builds the dependencies with the new compiler, and writes nothing when they fail" do
       with_toolchains do |registry|
-        registry.publish("v3.0", "b" * 40)
+        registry.publish("v1.3", "b" * 40)
         library = registry.dir / "library"
         Dir.mkdir_p(library / "lib" / "library")
         File.write(library / "lib" / "library" / "library.zn", "package library;\n")
@@ -433,7 +433,26 @@ describe Zane::Toolchain do
         # to, so the new release is the one the dependencies are built with.
         status, _, error = toolchain_update(project, compiler: (library / "zane.coda").to_s)
         status.should eq 1
-        error.should contain (Zane::Home.toolchains / "v3.0").to_s
+        error.should contain (Zane::Home.toolchains / "v1.3").to_s
+        {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
+      end
+    end
+
+    it "refuses a compiler that cannot build a dependency, and writes nothing" do
+      with_toolchains do |registry|
+        registry.publish("v1.0")
+        registry.publish("v3.0", "b" * 40)
+        library = registry.dir / "library"
+        Dir.mkdir_p(library / "lib" / "library")
+        File.write(library / "lib" / "library" / "library.zn", "package library;\n")
+        File.write(library / "zane.coda", "zane-version v1.0\nversion-pattern v*.+.++\n")
+        File.write(library / "zane-lock.coda", "resolutions [\n    key url commit\n    zane #{Zane::CompilerRelease::URL} #{"a" * 40}\n]\n")
+        project = toolchain_project(registry, "v1.0", "a" * 40, "    library v0.1 ../library\n",
+          "    library https://example.com/library #{"d" * 40}\n")
+        before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}
+        status, _, error = toolchain_update(project, "v3.0")
+        status.should eq 1
+        error.should contain "is built by compiler major 1 (v1.0), and the project by major 3"
         {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
       end
     end

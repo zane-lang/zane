@@ -61,7 +61,8 @@ private class Registry
   # Publishes *name* at *tag*, depending on *deps* (each a name and tag
   # published before), and returns the tag's commit.
   def publish(name : String, tag : String, deps = [] of {String, String}, kind = "library",
-              archive : Bytes? = nil, artifacts = true, package_name = name, pattern = "v*.+.++") : String
+              archive : Bytes? = nil, artifacts = true, package_name = name, pattern = "v*.+.++",
+              zane_version = "v0.1") : String
     repo = @dir / name
     unless Dir.exists?(repo)
       Dir.mkdir_p(repo)
@@ -73,7 +74,7 @@ private class Registry
     Dir.mkdir_p(dir)
     File.write(dir / "#{name}.zn", "package #{package_name};\n")
     File.write(repo / "zane.coda", <<-CODA)
-      zane-version v0.1
+      zane-version #{zane_version}
       version-pattern #{pattern}
 
       deps [
@@ -343,6 +344,33 @@ describe Zane::Commands::Add do
       expect_raises(Zane::UserError, "has no public library package") { zane(["add", registry.url("tool")], project) }
       registry.publish("bare", "v1.0", artifacts: false)
       expect_raises(Zane::UserError, "set its `from` to `source`") { zane(["add", registry.url("bare")], project) }
+    end
+  end
+
+  it "builds a library with the project's compiler when its zane-version is no newer and of the same major" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0", zane_version: "v0.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+    end
+  end
+
+  it "refuses a library that needs a newer compiler, or one of another major, before fetching its objects" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0", zane_version: "v0.3")
+      registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}])
+      registry.publish("geometry", "v1.0", zane_version: "v1.0")
+      expect_raises(Zane::UserError, "`math` (#{registry.url("math")} v1.0) needs compiler v0.3 or later") do
+        zane(["add", registry.url("shapes")], project)
+      end
+      expect_raises(Zane::UserError, "`zane toolchain update v0.3` moves the project") do
+        zane(["add", registry.url("shapes")], project)
+      end
+      expect_raises(Zane::UserError, "is built by compiler major 1 (v1.0), and the project by major 0") do
+        zane(["add", registry.url("geometry")], project)
+      end
+      registry.fetched.should be_empty
+      read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({} of String => Hash(String, String))
     end
   end
 

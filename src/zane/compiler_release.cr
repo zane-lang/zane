@@ -13,6 +13,14 @@ module Zane
     # A compiler tag: `vMAJOR.MINOR`.
     TAG = /\Av(\d+)\.(\d+)\z/
 
+    # The major and minor numbers of a compiler tag, or nil when *tag* is not
+    # one.
+    def self.version(tag : String) : {Int32, Int32}?
+      m = TAG.match(tag) || return nil
+      major, minor = m[1].to_i?, m[2].to_i?
+      major && minor ? {major, minor} : nil
+    end
+
     # What an installed toolchain records about itself, in its directory.
     RECORD = "toolchain.coda"
 
