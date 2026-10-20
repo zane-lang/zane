@@ -2,8 +2,9 @@
 
 `zane` is the tool a Zane programmer runs. It creates projects, manages their
 dependencies, and builds and runs them. It does not compile anything itself.
-Each project's `zane-version` names the compiler that builds it, and `zane`
-installs and runs that compiler, `zanec`
+The `zane-version` of the project being built names the compiler that builds
+it and every package it depends on, and `zane` installs and runs that
+compiler, `zanec`
 ([`dependencies.md` §14](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#14-toolchain-version)).
 
 This document lists every command, says which parts of the spec each one
@@ -203,7 +204,16 @@ and warn about each URL in `remaps` that names no package of the graph
 `check`, `build`, `run`, `test`, `fetch` and `add` each read the graph from the
 project's two files and, recursively, from each dependency's own two files at
 its pinned commit ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)).
-Only `check` stops before the objects: it needs the sources alone. The
+Only `check` stops before the objects: it needs the sources alone.
+
+The project's compiler compiles the project and each `source` and path
+dependency, reads every package of the graph, and rewrites and links every
+object; a `release` dependency's objects come from its own `zane-version`. Once the sources are read, and before any archive is downloaded,
+`zane` refuses a package whose `zane-version` is of a major other than the
+project's, or newer than the project's, naming each such package
+([§14](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#14-toolchain-version)).
+When a newer compiler of the project's major would build them all, the error
+names the `zane toolchain update` that moves the project to it. The
 project's `test-deps` rows join the graph for `test`, `fetch`, and the test
 packages `check` checks, and never for `build` or `run`; a dependency's own
 `test-deps` never join it
@@ -268,10 +278,10 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 
 | Command | Does |
 |---|---|
-| `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has `zanec` write their `!`-prefixed objects for each target, packs one archive per target, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
+| `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has the compiler its `zane-version` names write their `!`-prefixed objects for each target, packs one archive per target, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
-| `zane toolchain update [tag] [--accept-tag-move]` | Installs the latest published compiler release, or the tag named, as `install` does, then moves the project's compiler pin to it: `zane-version` and the `zane` lock row's commit together. Fetches the project's graph for the host with that compiler first, as `update` does (§3), so a pin the project cannot build with is refused and nothing is written. A tag that now points to another commit than the lock row pins has moved, and is refused with a security error without the flag. |
+| `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and the `zane` lock row's commit together. Fetches the project's graph for the host with that compiler first, as `update` does (§3), so a pin the project cannot build with is refused and nothing is written, a pin older than a package's `zane-version` or of another major included. A tag that now points to another commit than the lock row pins has moved, and is refused with a security error without the flag. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed: the one program, or the one named when there are several. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 

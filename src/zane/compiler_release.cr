@@ -10,8 +10,16 @@ module Zane
     # `zane` lock row.
     URL = "https://github.com/zane-lang/compiler"
 
-    # A compiler tag: `vMAJOR.MINOR`.
-    TAG = /\Av(\d+)\.(\d+)\z/
+    # A compiler tag: `vMAJOR.MINOR`, each number without leading zeros.
+    TAG = /\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z/
+
+    # The major and minor numbers of a compiler tag, or nil when *tag* is not
+    # one.
+    def self.version(tag : String) : {Int32, Int32}?
+      m = TAG.match(tag) || return nil
+      major, minor = m[1].to_i?, m[2].to_i?
+      major && minor ? {major, minor} : nil
+    end
 
     # What an installed toolchain records about itself, in its directory.
     RECORD = "toolchain.coda"
@@ -30,6 +38,12 @@ module Zane
         end
       end
 
+      pick(listed(url), tag, url)
+    end
+
+    # The release tags of the repository at *url*, each with the commit it
+    # points to, listed by git, so no API access is needed.
+    def self.listed(url : String = URL) : Hash(String, String)
       output = IO::Memory.new
       error = IO::Memory.new
       status = begin
@@ -40,7 +54,12 @@ module Zane
       unless status.success?
         raise UserError.new("cannot list the compiler releases at #{url}:\n#{error.to_s.strip}")
       end
-      pick(parse(output.to_s), tag, url)
+      parse(output.to_s)
+    end
+
+    # The newest of *tags* whose major is *major*, or nil when none is.
+    def self.newest(tags : Enumerable(String), major : Int32) : String?
+      tags.select { |t| version(t).try(&.[0]) == major }.max_by? { |t| version(t).not_nil![1] }
     end
 
     # The releases from *url* installed under *toolchains*, each with its

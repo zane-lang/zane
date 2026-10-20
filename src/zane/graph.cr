@@ -1,6 +1,7 @@
 require "file_utils"
 require "./cache"
 require "./compiler"
+require "./compiler_release"
 require "./errors"
 require "./home"
 require "./layout"
@@ -97,6 +98,7 @@ module Zane
       visit(manifest, "", [] of String, manifest.deps)
       visit(manifest, TEST_EDGES, [] of String, manifest.test_deps) if @test
       check_names
+      check_compilers
       @stale_remaps = manifest.remaps.reject do |url|
         normalized = PackageUrl.parse(url).normalized
         @packages.any? { |p| p.url.normalized == normalized }
@@ -226,6 +228,37 @@ module Zane
         raise UserError.new("#{other} and #{package.url} have the same identity hash, so their symbols would collide")
       end
       @hashes[hash] = package.url.normalized
+    end
+
+    # The project's compiler builds every package of the graph, so each
+    # package's `zane-version`, the oldest compiler that builds it, must be
+    # of the same major and no newer (spec dependencies.md §14).
+    private def check_compilers : Nil
+      tag = @workspace.zane_version
+      major, minor = CompilerRelease.version(tag).not_nil!
+      # Each problem, and the minor that would solve it when a newer compiler
+      # of the project's major would.
+      problems = @packages.compact_map do |p|
+        needed = p.manifest.zane_version
+        what = "`#{p.key}` (#{p.url} #{p.tag})"
+        unless needed
+          next({"#{what} has no `zane-version`", nil})
+        end
+        version = CompilerRelease.version(needed)
+        if version.nil?
+          {"#{what} names `#{needed}` as its compiler, which is not a compiler release", nil}
+        elsif version[0] != major
+          {"#{what} is built by compiler major #{version[0]} (#{needed}), and the project by major #{major}", nil}
+        elsif version[1] > minor
+          {"#{what} needs compiler #{needed} or later", version[1]}
+        end
+      end
+      return if problems.empty?
+      fixes = problems.compact_map(&.[1])
+      hint = fixes.size == problems.size ? "; `zane toolchain update v#{major}.#{fixes.max}` moves the project to a compiler that builds them" : ""
+      raise UserError.new("the project is built by compiler #{tag}, which builds every package it depends on: " \
+                          "#{problems.map(&.[0]).join("; ")}. A program is built by one compiler, so every package shares its major " \
+                          "and needs a compiler no newer than it#{hint}")
     end
 
     # Collapses the versions of each package the project lists in `remaps`

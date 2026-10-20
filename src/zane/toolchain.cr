@@ -9,6 +9,8 @@ module Zane::Toolchain
 
   # Specs replace the Git lookup, just as they replace Archive.download.
   class_property resolve : Proc(String, CompilerRelease) = ->(tag : String) { CompilerRelease.resolve(tag) }
+  # And the listing of the release tags.
+  class_property releases : Proc(Array(String)) = -> { CompilerRelease.listed.keys }
 
   def self.host : String
     {% if flag?(:win32) %}

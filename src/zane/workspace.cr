@@ -1,3 +1,4 @@
+require "./compiler_release"
 require "./errors"
 require "./layout"
 require "./manifest"
@@ -28,6 +29,9 @@ module Zane
       unless manifest.zane_version
         raise UserError.new("#{root / MANIFEST} has no `zane-version` field")
       end
+      unless CompilerRelease.version(manifest.zane_version.not_nil!)
+        raise UserError.new("#{root / MANIFEST}: `zane-version` is `#{manifest.zane_version}`, which is not a compiler release; it is vMAJOR.MINOR, such as v0.14")
+      end
       new(manifest)
     end
 
@@ -40,7 +44,8 @@ module Zane
       root.basename
     end
 
-    # The compiler release that builds the project.
+    # The compiler release that builds the project, and every package of its
+    # graph (spec dependencies.md §14).
     def zane_version : String
       manifest.zane_version.not_nil!
     end
