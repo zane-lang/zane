@@ -236,27 +236,28 @@ module Zane
     private def check_compilers : Nil
       tag = @workspace.zane_version
       major, minor = CompilerRelease.version(tag).not_nil!
+      # Each problem, and the minor that would solve it when a newer compiler
+      # of the project's major would.
       problems = @packages.compact_map do |p|
         needed = p.manifest.zane_version
         what = "`#{p.key}` (#{p.url} #{p.tag})"
         unless needed
-          next "#{what} has no `zane-version`"
+          next({"#{what} has no `zane-version`", nil})
         end
         version = CompilerRelease.version(needed)
         if version.nil?
-          "#{what} names `#{needed}` as its compiler, which is not a compiler release"
+          {"#{what} names `#{needed}` as its compiler, which is not a compiler release", nil}
         elsif version[0] != major
-          "#{what} is built by compiler major #{version[0]} (#{needed}), and the project by major #{major}"
+          {"#{what} is built by compiler major #{version[0]} (#{needed}), and the project by major #{major}", nil}
         elsif version[1] > minor
-          "#{what} needs compiler #{needed} or later"
+          {"#{what} needs compiler #{needed} or later", version[1]}
         end
       end
       return if problems.empty?
-      newest = @packages.compact_map { |p| p.manifest.zane_version.try { |v| CompilerRelease.version(v) } }
-        .select { |v| v[0] == major }.max_of?(&.[1])
-      hint = newest && newest > minor ? "; `zane toolchain update v#{major}.#{newest}` moves the project to a compiler that builds them" : ""
+      fixes = problems.compact_map(&.[1])
+      hint = fixes.size == problems.size ? "; `zane toolchain update v#{major}.#{fixes.max}` moves the project to a compiler that builds them" : ""
       raise UserError.new("the project is built by compiler #{tag}, which builds every package it depends on: " \
-                          "#{problems.join("; ")}. A program is built by one compiler, so every package shares its major " \
+                          "#{problems.map(&.[0]).join("; ")}. A program is built by one compiler, so every package shares its major " \
                           "and needs a compiler no newer than it#{hint}")
     end
 

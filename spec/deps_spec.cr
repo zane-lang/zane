@@ -374,6 +374,19 @@ describe Zane::Commands::Add do
     end
   end
 
+  it "suggests a newer compiler only when it would build every package refused" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0", zane_version: "v0.3")
+      registry.publish("geometry", "v1.0", zane_version: "v1.0")
+      registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}, {"geometry", "v1.0"}])
+      error = expect_raises(Zane::UserError, "needs compiler v0.3 or later") do
+        zane(["add", registry.url("shapes")], project)
+      end
+      error.message.not_nil!.should contain "is built by compiler major 1"
+      error.message.not_nil!.should_not contain "zane toolchain update"
+    end
+  end
+
   it "labels a dependency with a key that source never writes, which imports its packages by their names" do
     with_registry do |registry, project, log|
       registry.publish("math-lib", "v1.0", package_name: "math")

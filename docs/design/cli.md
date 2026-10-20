@@ -208,8 +208,8 @@ Only `check` stops before the objects: it needs the sources alone.
 
 Every package of the graph is compiled, rewritten and linked by the project's
 compiler. Once the sources are read, and before any archive is downloaded,
-`zane` refuses a package whose `zane-version` is of another major than the
-project's, or newer than it, naming each such package
+`zane` refuses a package whose `zane-version` is of a major other than the
+project's, or newer than the project's, naming each such package
 ([§14](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#14-toolchain-version)).
 When a newer compiler of the project's major would build them all, the error
 names the `zane toolchain update` that moves the project to it. The
