@@ -38,6 +38,12 @@ module Zane
         end
       end
 
+      pick(listed(url), tag, url)
+    end
+
+    # The release tags of the repository at *url*, each with the commit it
+    # points to, listed by git, so no API access is needed.
+    def self.listed(url : String = URL) : Hash(String, String)
       output = IO::Memory.new
       error = IO::Memory.new
       status = begin
@@ -48,7 +54,12 @@ module Zane
       unless status.success?
         raise UserError.new("cannot list the compiler releases at #{url}:\n#{error.to_s.strip}")
       end
-      pick(parse(output.to_s), tag, url)
+      parse(output.to_s)
+    end
+
+    # The newest of *tags* whose major is *major*, or nil when none is.
+    def self.newest(tags : Enumerable(String), major : Int32) : String?
+      tags.select { |t| version(t).try(&.[0]) == major }.max_by? { |t| version(t).not_nil![1] }
     end
 
     # The releases from *url* installed under *toolchains*, each with its

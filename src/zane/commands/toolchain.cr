@@ -28,8 +28,9 @@ module Zane::Commands
   end
 
   # `zane toolchain update [tag] [--accept-tag-move]` (§4): installs the
-  # compiler release named, or else the latest, and moves the project's
-  # compiler pin to it, `zane-version` and the `zane` lock row together.
+  # compiler release named, or else the newest of the project's major, and
+  # moves the project's compiler pin to it, `zane-version` and the `zane` lock
+  # row together.
   class ToolchainUpdate < EditCommand
     @accept_tag_move = false
 
@@ -48,8 +49,9 @@ module Zane::Commands
     def run : Int32
       ws = workspace
       current, locked = ws.toolchain
+      tag = @args[0]? || newest_in_major(current)
       release = InstallProgress.run(@error) do |progress|
-        Zane::Toolchain.install(@args[0]?, @toolchains,
+        Zane::Toolchain.install(tag, @toolchains,
           vet: ->(r : CompilerRelease) { check_tag_move(r, locked) if r.tag == current; nil },
           progress: ->progress.stage(String))
       end
@@ -72,6 +74,15 @@ module Zane::Commands
         })
       @output.puts "Updated zane #{current} -> #{release.tag} (commit #{release.commit[0, 12]})."
       0
+    end
+
+    # The newest compiler release of *current*'s major. Moving to another
+    # major changes what the project's code must be, so it is done only by
+    # naming the release (spec dependencies.md §2.3, §14).
+    private def newest_in_major(current : String) : String
+      major = CompilerRelease.version(current).not_nil![0]
+      CompilerRelease.newest(Zane::Toolchain.releases.call, major) ||
+        raise UserError.new("#{CompilerRelease::URL} has no release of major #{major}; name the release to move to")
     end
 
     # A compiler tag that now points to another commit than the lock pins has

@@ -79,10 +79,13 @@ private def with_toolchains(&)
     nil
   }
   Zane::Toolchain.resolve = ->(tag : String) { Zane::CompilerRelease.new(tag, registry.commits[tag]) }
+  releases = Zane::Toolchain.releases
+  Zane::Toolchain.releases = -> { registry.commits.keys }
   begin
     yield registry
   ensure
     Zane::Archive.download, Zane::Toolchain.resolve = download, resolve
+    Zane::Toolchain.releases = releases
     home ? (ENV["ZANE_HOME"] = home) : ENV.delete("ZANE_HOME")
     FileUtils.rm_rf(registry.dir)
   end
@@ -346,32 +349,56 @@ describe Zane::Toolchain do
   describe "update" do
     it "shows terminal progress while installing the project's new compiler" do
       with_toolchains do |registry|
-        registry.publish("v3.0", "b" * 40)
+        registry.publish("v1.3", "b" * 40)
         project = toolchain_project(registry, "v1.0", "a" * 40)
         with_terminal do |terminal|
           output = IO::Memory.new
           Zane::Commands::ToolchainUpdate.new([] of String, output, terminal, project).run.should eq 0
-          terminal.to_s.should contain "Downloading compiler v3.0"
+          terminal.to_s.should contain "Downloading compiler v1.3"
           terminal.to_s.should end_with "\r\e[K"
-          output.to_s.should contain "Updated zane v1.0 -> v3.0"
+          output.to_s.should contain "Updated zane v1.0 -> v1.3"
         end
       end
     end
 
-    it "installs the latest release and pins the project to it in both files" do
+    it "installs the newest release of the project's major and pins the project to it in both files" do
       with_toolchains do |registry|
         registry.publish("v1.0")
-        registry.publish("v3.0", "b" * 40)
+        registry.publish("v1.10", "b" * 40)
+        registry.publish("v1.9", "c" * 40)
+        registry.publish("v3.0", "d" * 40)
         project = toolchain_project(registry, "v1.0", "a" * 40)
         status, output, _ = toolchain_update(project)
         status.should eq 0
-        output.should eq "Updated zane v1.0 -> v3.0 (commit #{"b" * 12}).\n"
-        File.read(project / "zane.coda").should start_with "zane-version v3.0\nversion-pattern v*.+.++\n"
+        output.should eq "Updated zane v1.0 -> v1.10 (commit #{"b" * 12}).\n"
+        File.read(project / "zane.coda").should start_with "zane-version v1.10\nversion-pattern v*.+.++\n"
         read_coda(project / "zane-lock.coda")["resolutions"].should eq({
           "columns" => ["url", "commit"],
           "rows"    => {"zane" => {"url" => Zane::CompilerRelease::URL, "commit" => "b" * 40}},
         })
-        Zane::CompilerRelease.installed(Zane::Home.toolchains).should eq({"v3.0" => "b" * 40})
+        Zane::CompilerRelease.installed(Zane::Home.toolchains).should eq({"v1.10" => "b" * 40})
+      end
+    end
+
+    it "moves to another major only when the release is named" do
+      with_toolchains do |registry|
+        registry.publish("v1.0")
+        registry.publish("v3.0", "b" * 40)
+        project = toolchain_project(registry, "v1.0", "a" * 40)
+        toolchain_update(project)[1].should contain "nothing changed"
+        toolchain_update(project, "v3.0")[0].should eq 0
+        Zane::Manifest.load(project).zane_version.should eq "v3.0"
+      end
+    end
+
+    it "refuses a versionless update when the project's major has no release" do
+      with_toolchains do |registry|
+        registry.publish("v3.0", "b" * 40)
+        project = toolchain_project(registry, "v1.0", "a" * 40)
+        status, _, error = toolchain_update(project)
+        status.should eq 1
+        error.should contain "has no release of major 1"
+        registry.fetched.should be_empty
       end
     end
 
