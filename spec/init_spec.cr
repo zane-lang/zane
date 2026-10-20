@@ -56,6 +56,12 @@ ensure
 end
 
 describe Zane::CompilerRelease do
+  it "reads the major and minor of a canonical vMAJOR.MINOR tag alone" do
+    Zane::CompilerRelease.version("v0.14").should eq({0, 14})
+    Zane::CompilerRelease.version("v10.0").should eq({10, 0})
+    ["v01.0", "v1.00", "v1", "v1.0.0", "1.0"].each { |tag| Zane::CompilerRelease.version(tag).should be_nil }
+  end
+
   it "takes the newest vMAJOR.MINOR tag, at the commit an annotated tag points to" do
     release = Zane::CompilerRelease.resolve(nil, COMPILER)
     release.should eq Zane::CompilerRelease.new("v0.3", V03)

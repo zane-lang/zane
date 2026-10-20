@@ -10,8 +10,8 @@ module Zane
     # `zane` lock row.
     URL = "https://github.com/zane-lang/compiler"
 
-    # A compiler tag: `vMAJOR.MINOR`.
-    TAG = /\Av(\d+)\.(\d+)\z/
+    # A compiler tag: `vMAJOR.MINOR`, each number without leading zeros.
+    TAG = /\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z/
 
     # The major and minor numbers of a compiler tag, or nil when *tag* is not
     # one.
