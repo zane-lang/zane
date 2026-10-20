@@ -206,8 +206,9 @@ project's two files and, recursively, from each dependency's own two files at
 its pinned commit ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)).
 Only `check` stops before the objects: it needs the sources alone.
 
-Every package of the graph is compiled, rewritten and linked by the project's
-compiler. Once the sources are read, and before any archive is downloaded,
+The project's compiler compiles the project and each `source` and path
+dependency, reads every package of the graph, and rewrites and links every
+object; a `release` dependency's objects come from its own `zane-version`. Once the sources are read, and before any archive is downloaded,
 `zane` refuses a package whose `zane-version` is of a major other than the
 project's, or newer than the project's, naming each such package
 ([§14](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#14-toolchain-version)).
