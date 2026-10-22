@@ -21,14 +21,6 @@ module Zane
       major && minor ? {major, minor} : nil
     end
 
-    # Whether the compiler *tag* builds a package whose `zane-version` is
-    # *needed*: one of its major, and no newer (spec dependencies.md §14).
-    def self.builds?(tag : String, needed : String?) : Bool
-      have = version(tag) || return false
-      want = needed.try { |n| version(n) } || return false
-      want[0] == have[0] && want[1] <= have[1]
-    end
-
     # What an installed toolchain records about itself, in its directory.
     RECORD = "toolchain.coda"
 

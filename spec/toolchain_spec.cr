@@ -445,7 +445,7 @@ describe Zane::Toolchain do
       end
     end
 
-    it "builds the dependencies with the new compiler, and writes nothing when they fail" do
+    it "moves the pin without building the dependencies, which the next build does" do
       with_toolchains do |registry|
         registry.publish("v1.3", "b" * 40)
         library = registry.dir / "library"
@@ -455,13 +455,12 @@ describe Zane::Toolchain do
         File.write(library / "zane-lock.coda", "resolutions [\n    key url commit\n    zane #{Zane::CompilerRelease::URL} #{"a" * 40}\n]\n")
         project = toolchain_project(registry, "v1.0", "a" * 40, "    library v0.1 ../library\n",
           "    library https://example.com/library #{"d" * 40}\n")
-        before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}
-        # A compiler named by ZANE_COMPILER is not the release being moved
-        # to, so the new release is the one the dependencies are built with.
-        status, _, error = toolchain_update(project, compiler: (library / "zane.coda").to_s)
-        status.should eq 1
-        error.should contain (Zane::Home.toolchains / "v1.3").to_s
-        {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
+        # The release installed holds no compiler that runs, so the update
+        # succeeds only because it runs none.
+        status, output, error = toolchain_update(project)
+        {status, error}.should eq({0, ""})
+        output.should eq "Updated zane v1.0 -> v1.3 (commit #{"b" * 12}).\n"
+        Zane::Manifest.load(project).zane_version.should eq "v1.3"
       end
     end
 

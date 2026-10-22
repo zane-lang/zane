@@ -108,7 +108,7 @@ private class Registry
   end
 end
 
-DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_FAIL GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
+DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
 
 private def with_registry(&)
   base = Path[File.join(Dir.tempdir, "zane-spec-deps-#{Random::Secure.hex(6)}")]
@@ -263,7 +263,7 @@ describe Zane::Archive do
 end
 
 describe Zane::Commands::Add do
-  it "pins the newest tag, fetches and rewrites its objects, and records it in both files" do
+  it "pins the newest tag and records it in both files, leaving its objects to the build" do
     with_registry do |registry, project, log|
       registry.publish("math", "v1.0")
       commit = registry.publish("math", "v1.2")
@@ -277,12 +277,15 @@ describe Zane::Commands::Add do
       lock = read_coda(project / "zane-lock.coda")["resolutions"].as(Hash)["rows"].as(Hash)
       lock["math"].should eq({"url" => registry.url("math"), "commit" => commit})
 
+      File.file?(entry("math", "v1.2") / "src" / "lib" / "math" / "math.zn").should be_true
+      registry.fetched.should be_empty
+      File.exists?(log).should be_false
+
+      zane(["build"], project)[0].should eq 0
       stamp = registry.stamp("math", "v1.2")
       rewritten = entry("math", "v1.2") / "build" / Zane::Target::HOST / "math.o"
       File.read(rewritten).should eq "rewritten #{stamp}\nobject math v1.2"
       File.read(entry("math", "v1.2") / "artifacts" / Zane::Target::HOST / "build" / "math.o").should eq "object math v1.2"
-      File.file?(entry("math", "v1.2") / "src" / "lib" / "math" / "math.zn").should be_true
-      File.read_lines(log).size.should eq 1
     end
   end
 
@@ -301,18 +304,20 @@ describe Zane::Commands::Add do
     end
   end
 
-  it "fetches what a library depends on, which is linked too" do
+  it "resolves what a library depends on, which is linked too" do
     with_registry do |registry, project, log|
       registry.publish("math", "v1.0")
       registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}])
       zane(["add", registry.url("shapes")], project)[0].should eq 0
-      registry.fetched.size.should eq 2
       zane(["check"], project)[0].should eq 0
+      registry.fetched.should be_empty
       shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
       File.read_lines(log).last.should eq(
         "--check --kind application --package app=#{project / "bin" / "app"} " \
         "--package #{shapes}=#{entry("shapes", "v2.0") / "src" / "lib" / "shapes"} --package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} " \
         "--import #{shapes}:math=#{math} --import app:shapes=#{shapes}")
+      zane(["build"], project)[0].should eq 0
+      registry.fetched.size.should eq 2
     end
   end
 
@@ -355,22 +360,23 @@ describe Zane::Commands::Add do
     end
   end
 
-  it "refuses an archive whose hash is not the committed one, and writes nothing" do
+  it "refuses to build with an archive whose hash is not the committed one" do
     with_registry do |registry, project|
       registry.publish("math", "v1.0")
       File.write(registry.downloads.values.first, "tampered")
-      expect_raises(Zane::UserError, "security error") { zane(["add", registry.url("math")], project) }
-      read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({} of String => Hash(String, String))
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      expect_raises(Zane::UserError, "security error") { zane(["build"], project) }
       Dir.exists?(entry("math", "v1.0") / "build").should be_false
     end
   end
 
-  it "refuses a project with no public library package, and a library without objects for the target" do
+  it "refuses a project with no public library package, and builds no library without objects for the target" do
     with_registry do |registry, project|
       registry.publish("tool", "v1.0", kind: "application")
       expect_raises(Zane::UserError, "has no public library package") { zane(["add", registry.url("tool")], project) }
       registry.publish("bare", "v1.0", artifacts: false)
-      expect_raises(Zane::UserError, "set its `from` to `source`") { zane(["add", registry.url("bare")], project) }
+      zane(["add", registry.url("bare")], project)[0].should eq 0
+      expect_raises(Zane::UserError, "set its `from` to `source`") { zane(["build"], project) }
     end
   end
 
@@ -446,6 +452,7 @@ describe Zane::Commands::Fetch do
     with_registry do |registry, project, log|
       registry.publish("math", "v1.0")
       zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["fetch"], project)[0].should eq 0
       lock = project / "zane-lock.coda"
       File.write(lock, File.read(lock).sub("0123456789abcdef0123456789abcdef01234567", "fedcba9876543210fedcba9876543210fedcba98"))
       zane(["fetch"], project).should eq({0, "Fetched 1 package for #{Zane::Target::HOST}.\n", ""})
@@ -486,6 +493,8 @@ describe Zane::Commands::Update do
       zane(["update"], project)[1].should eq "Updated math v1.0 -> v1.1 (commit #{newest[0, 12]}).\n"
       deps_rows(project).should eq({"math" => {"version" => "v1.1", "from" => "release"}})
       lock_rows(project)["math"]["commit"].should eq newest
+      File.exists?(entry("math", "v1.1") / "build" / Zane::Target::HOST / "math.o").should be_false
+      zane(["fetch"], project)[0].should eq 0
       File.exists?(entry("math", "v1.1") / "build" / Zane::Target::HOST / "math.o").should be_true
       zane(["update", "math"], project)[1].should eq "math is already at its newest tag; nothing changed.\n"
       zane(["update", "math", "v1.0"], project)[1].should start_with "Updated math v1.1 -> v1.0"
@@ -509,70 +518,36 @@ describe Zane::Commands::Update do
     end
   end
 
-  it "writes nothing when the new version cannot be fetched" do
+  it "moves the pin without downloading the new version's objects, which the build fetches" do
     with_registry do |registry, project|
       registry.publish("math", "v1.0")
       zane(["add", registry.url("math")], project)[0].should eq 0
       registry.publish("math", "v2.0")
       registry.downloads.delete(registry.downloads.keys.last)
-      expect_raises(Zane::UserError, "404") { zane(["update", "math"], project) }
-      deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => "release"}})
-    end
-  end
-end
-
-describe Zane::Commands::ToolchainUpdate do
-  it "moves the compiler and each dependency it cannot build as pinned together, to the newest version it builds" do
-    with_registry do |registry, project|
-      registry.publish("core", "v0.1")
-      registry.publish("math", "v1.0")
-      zane(["add", registry.url("core"), "--from-source"], project)[0].should eq 0
-      zane(["add", registry.url("math")], project)[0].should eq 0
-      wanted = registry.publish("core", "v0.2", zane_version: "v0.3")
-      registry.publish("core", "v0.3", zane_version: "v0.4")
-      registry.publish("math", "v1.1")
-      # The compiler the dependency needs is named by the hint, and that is
-      # the command that moves both.
-      expect_raises(Zane::UserError, "`zane toolchain update v0.4` moves the project") { zane(["update", "core"], project) }
-      expect_raises(Zane::UserError, "`zane toolchain update v0.3` moves the project") { zane(["update", "core", "v0.2"], project) }
-      ENV["FAKE_ZANEC_FAIL"] = registry.id("core", "v0.1")
-      status, output, error = toolchain_update(registry, project, "v0.3")
-      {status, error}.should eq({0, ""})
-      output.should eq "Updated zane v0.1 -> v0.3 (commit #{"c" * 12}).\n" \
-                       "Updated core v0.1 -> v0.2 (commit #{wanted[0, 12]}), the newest version compiler v0.3 builds.\n"
-      read_coda(project / "zane.coda")["zane-version"].should eq "v0.3"
-      deps_rows(project).should eq({"core" => {"version" => "v0.2", "from" => "source"},
-                                    "math" => {"version" => "v1.0", "from" => "release"}})
-      lock_rows(project)["core"]["commit"].should eq wanted
-      lock_rows(project)["zane"]["commit"].should eq "c" * 40
+      zane(["update", "math"], project)[0].should eq 0
+      deps_rows(project).should eq({"math" => {"version" => "v2.0", "from" => "release"}})
+      registry.fetched.should be_empty
+      expect_raises(Zane::UserError, "404") { zane(["build"], project) }
     end
   end
 
-  it "moves a dependency that brings in a package of another major when the release named is of another" do
-    with_registry do |registry, project|
-      registry.publish("core", "v0.1")
-      registry.publish("shapes", "v1.0", deps: [{"core", "v0.1"}])
-      zane(["add", registry.url("shapes")], project)[0].should eq 0
-      registry.publish("core", "v1.0", zane_version: "v1.0")
-      wanted = registry.publish("shapes", "v2.0", deps: [{"core", "v1.0"}], zane_version: "v1.0")
-      status, output, _ = toolchain_update(registry, project, "v1.0")
-      status.should eq 0
-      output.should contain "Updated shapes v1.0 -> v2.0 (commit #{wanted[0, 12]})"
-      deps_rows(project).should eq({"shapes" => {"version" => "v2.0", "from" => "release"}})
-    end
-  end
-
-  it "writes nothing when no newer version of the dependency builds" do
-    with_registry do |registry, project|
+  it "refuses a version that needs a newer compiler, and takes it once the compiler has moved" do
+    with_registry do |registry, project, log|
       registry.publish("core", "v0.1")
       zane(["add", registry.url("core"), "--from-source"], project)[0].should eq 0
-      registry.publish("core", "v0.2", zane_version: "v0.4")
+      registry.publish("core", "v0.2", zane_version: "v0.3")
       before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}
-      ENV["FAKE_ZANEC_FAIL"] = registry.id("core", "v0.1")
-      status, _, error = toolchain_update(registry, project, "v0.3")
-      status.should eq 1
-      error.should contain "the compiler could not build core v0.1"
+      expect_raises(Zane::UserError, "`zane toolchain update v0.3` moves the project") { zane(["update", "core"], project) }
       {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
+      # The new compiler cannot build the version pinned, which does not
+      # matter until a build: the compiler moves first, then the dependency.
+      ENV["FAKE_ZANEC_STATUS"] = "1"
+      toolchain_update(registry, project, "v0.3")[0].should eq 0
+      zane(["update", "core"], project)[0].should eq 0
+      ENV.delete("FAKE_ZANEC_STATUS")
+      File.exists?(log).should be_false
+      read_coda(project / "zane.coda")["zane-version"].should eq "v0.3"
+      deps_rows(project).should eq({"core" => {"version" => "v0.2", "from" => "source"}})
     end
   end
 end
@@ -683,7 +658,7 @@ describe "test-deps" do
       math, probe = registry.id("math", "v1.0"), registry.id("probe", "v3.0")
       math_src, probe_src = entry("math", "v1.0") / "src" / "lib" / "math", entry("probe", "v3.0") / "src" / "lib" / "probe"
       geo = "--package geo=#{project / "lib" / "geo"}"
-      File.delete(log)
+      FileUtils.rm_f(log)
       zane(["check"], project)[0].should eq 0
       File.read_lines(log).should eq [
         "--check --kind library #{geo} --package #{math}=#{math_src} --import geo:math=#{math}",
@@ -771,6 +746,7 @@ describe Zane::Commands::Cache do
     with_registry do |registry, project|
       registry.publish("math", "v1.0")
       zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["fetch"], project)[0].should eq 0
       zane(["cache", "path"], project)[1].should eq "#{Zane::Home.packages}\n"
       zane(["cache", "list"], project)[1].should match /\Aexample.com\/math v1.0  #{Zane::Target::HOST}  \S+\n\z/
 

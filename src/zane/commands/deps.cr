@@ -17,7 +17,7 @@ require "./build"
 module Zane::Commands
   # What the commands that change a project's two files share
   # (docs/design/cli.md §3): their arguments, the project, and checking a
-  # change can be built before it is written.
+  # change resolves before it is written.
   abstract class EditCommand
     @args = [] of String
     @workspace : Workspace? = nil
@@ -50,13 +50,12 @@ module Zane::Commands
       @workspace ||= Workspace.find(@dir)
     end
 
-    # Fetches the whole graph of *manifest* for the host, its `test-deps`
-    # included, with *compiler*, or else the one *manifest* names, so that a
-    # change which leaves the project or its tests unable to build is refused
-    # before either file is written.
-    private def fetch(manifest : Manifest, compiler : Compiler? = nil) : Graph
+    # Resolves the whole graph of *manifest*, its `test-deps` included, so
+    # that a change which leaves it unable to resolve is refused before
+    # either file is written. Nothing is downloaded or compiled: `build`,
+    # `run`, `test` and `fetch` do that, once, for the pins they find.
+    private def resolve(manifest : Manifest) : Graph
       graph = Graph.new(Workspace.new(manifest), workspace.layout, test: true)
-      graph.objects(Target::HOST, compiler || Compiler.locate(manifest.zane_version.not_nil!, @toolchains))
       Commands.report(graph, @error)
       graph
     end
@@ -75,14 +74,9 @@ module Zane::Commands
     # The highest version tag of *tags*: a `v` and dot-separated numbers,
     # compared as numbers.
     private def newest(tags : Hash(String, String), url : PackageUrl) : String
-      tags.keys.compact_map { |t| tag_version(t) && t }.max_by? { |t| tag_version(t).not_nil! } ||
+      versions = tags.keys.select(&.matches?(/\Av?\d+(\.\d+)*\z/))
+      versions.max_by? { |t| t.lchop('v').split('.').map(&.to_i64) } ||
         raise UserError.new("#{url} has no version tags; name the tag")
-    end
-
-    # The numbers of a version tag, which compare as the versions do, or nil
-    # when *tag* is not one.
-    private def tag_version(tag : String) : Array(Int64)?
-      tag.lchop('v').split('.').map(&.to_i64) if tag.matches?(/\Av?\d+(\.\d+)*\z/)
     end
 
     # *tag* and the commit it points to now in *tags*, refused when the tag
@@ -146,14 +140,14 @@ module Zane::Commands
       tag, commit = pin(tags, url, @args[1]? || newest(tags, url))
 
       dep = Dependency.new(key, tag, @from_source ? "source" : "release", @test)
-      # The whole graph is fetched for the host before anything is written,
-      # so a library that cannot be used is never recorded.
-      graph = fetch(ws.manifest.with_dependency(dep, Resolution.new(url.url, commit)))
+      # The whole graph is resolved before anything is written, so a library
+      # that cannot be resolved is never recorded.
+      graph = resolve(ws.manifest.with_dependency(dep, Resolution.new(url.url, commit)))
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) { ProjectFiles.deps(doc, @test)[key] = Coda::Row.new.insert("version", tag).insert("from", dep.from); nil },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc)[key] = Coda::Row.new.insert("url", url.url).insert("commit", commit); nil })
 
-      how = @from_source ? "compiled from source" : "prebuilt for #{Target::HOST}"
+      how = @from_source ? "compiled from source" : "linked from its prebuilt objects"
       @output.puts "Added #{key} #{tag} (#{url}, commit #{commit[0, 12]}), #{how}#{@test ? ", for the tests" : ""}."
       edge = (@test ? graph.test_direct : graph.direct).find! { |e| e.key == key }
       imports = edge.package.layout.public_libs.map { |l| "import #{l.name}" }
@@ -245,7 +239,7 @@ module Zane::Commands
         return 0
       end
 
-      fetch(manifest)
+      resolve(manifest)
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) {
           updates.each { |_, d, _| ProjectFiles.deps(doc, d.test)[d.key]["version"] = d.version }
@@ -295,7 +289,7 @@ module Zane::Commands
 
       same_package(dep, Path[from].expand(ws.root)) unless off
       updated = dep.copy_with(from: from)
-      fetch(ws.manifest.with_dependency(updated, ws.manifest.resolutions[dep.key]))
+      resolve(ws.manifest.with_dependency(updated, ws.manifest.resolutions[dep.key]))
       ProjectFiles.change(ws.root, ->(doc : Coda::Doc) { ProjectFiles.deps(doc, dep.test)[dep.key]["from"] = from; nil })
       if off
         @output.puts "#{dep.key} now links its release, #{dep.version}."
