@@ -2,7 +2,8 @@
 # the stamp's line followed by the input, and `--remap FROM TO INPUT OUTPUT`
 # a line naming both stamps followed by the input. As a compiler (any run
 # given `--package`) it appends its arguments to the file `FAKE_ZANEC_LOG`
-# names, exits with `FAKE_ZANEC_STATUS`, for `--build OUT` copies itself to
+# names, exits with `FAKE_ZANEC_STATUS`, or with 1 when an argument contains
+# the text `FAKE_ZANEC_FAIL` names, for `--build OUT` copies itself to
 # OUT, and for `--object OUT` writes its arguments to OUT.
 # Run as that program, it prints its arguments and exits with
 # `FAKE_PROGRAM_STATUS`.
@@ -23,6 +24,9 @@ elsif ARGV.includes?("--package")
     File.open(log, "a") { |f| f.puts ARGV.join(" ") }
   end
   status = ENV.fetch("FAKE_ZANEC_STATUS", "0").to_i
+  if (fail = ENV["FAKE_ZANEC_FAIL"]?) && ARGV.any?(&.includes?(fail))
+    status = 1
+  end
   if status != 0
     STDERR.puts "fake compiler error"
     exit status

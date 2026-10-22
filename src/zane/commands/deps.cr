@@ -75,9 +75,14 @@ module Zane::Commands
     # The highest version tag of *tags*: a `v` and dot-separated numbers,
     # compared as numbers.
     private def newest(tags : Hash(String, String), url : PackageUrl) : String
-      versions = tags.keys.select(&.matches?(/\Av?\d+(\.\d+)*\z/))
-      versions.max_by? { |t| t.lchop('v').split('.').map(&.to_i64) } ||
+      tags.keys.compact_map { |t| tag_version(t) && t }.max_by? { |t| tag_version(t).not_nil! } ||
         raise UserError.new("#{url} has no version tags; name the tag")
+    end
+
+    # The numbers of a version tag, which compare as the versions do, or nil
+    # when *tag* is not one.
+    private def tag_version(tag : String) : Array(Int64)?
+      tag.lchop('v').split('.').map(&.to_i64) if tag.matches?(/\Av?\d+(\.\d+)*\z/)
     end
 
     # *tag* and the commit it points to now in *tags*, refused when the tag

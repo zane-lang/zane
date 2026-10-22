@@ -76,7 +76,9 @@ zane toolchain update v3.0
 
 It installs that compiler when it is missing, checks the project's
 dependencies build with it, and then writes the version into `zane.coda` and
-its commit into `zane-lock.coda`.
+its commit into `zane-lock.coda`. A dependency the new compiler cannot build
+as it is pinned moves in the same change, to its newest version that compiler
+builds.
 
 The compiler release workflow currently provides **Linux x86_64** archives,
 including LLVM libraries and Zig for building Linux and Windows programs.

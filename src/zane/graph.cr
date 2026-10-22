@@ -53,6 +53,16 @@ module Zane
     # the package by, and the version it pins.
     record Edge, key : String, package : Package
 
+    # A graph holding a package the project's compiler cannot build. *keys*
+    # are the project's own dependencies that bring such a package in.
+    class Unbuildable < UserError
+      getter keys : Array(String)
+
+      def initialize(message : String, @keys : Array(String))
+        super(message)
+      end
+    end
+
     def self.node(url : PackageUrl, tag : String) : String
       "#{url.normalized} #{tag}"
     end
@@ -242,23 +252,34 @@ module Zane
         needed = p.manifest.zane_version
         what = "`#{p.key}` (#{p.url} #{p.tag})"
         unless needed
-          next({"#{what} has no `zane-version`", nil})
+          next({p, "#{what} has no `zane-version`", nil})
         end
         version = CompilerRelease.version(needed)
         if version.nil?
-          {"#{what} names `#{needed}` as its compiler, which is not a compiler release", nil}
+          {p, "#{what} names `#{needed}` as its compiler, which is not a compiler release", nil}
         elsif version[0] != major
-          {"#{what} is built by compiler major #{version[0]} (#{needed}), and the project by major #{major}", nil}
+          {p, "#{what} is built by compiler major #{version[0]} (#{needed}), and the project by major #{major}", nil}
         elsif version[1] > minor
-          {"#{what} needs compiler #{needed} or later", version[1]}
+          {p, "#{what} needs compiler #{needed} or later", version[1]}
         end
       end
       return if problems.empty?
-      fixes = problems.compact_map(&.[1])
+      fixes = problems.compact_map(&.[2])
       hint = fixes.size == problems.size ? "; `zane toolchain update v#{major}.#{fixes.max}` moves the project to a compiler that builds them" : ""
-      raise UserError.new("the project is built by compiler #{tag}, which builds every package it depends on: " \
-                          "#{problems.map(&.[0]).join("; ")}. A program is built by one compiler, so every package shares its major " \
-                          "and needs a compiler no newer than it#{hint}")
+      raise Unbuildable.new("the project is built by compiler #{tag}, which builds every package it depends on: " \
+                            "#{problems.map(&.[1]).join("; ")}. A program is built by one compiler, so every package must " \
+                            "share the project compiler's major and need a compiler no newer than it#{hint}",
+        reaching(problems.map(&.[0])))
+    end
+
+    # The keys of the project's own dependencies that bring in one of
+    # *packages*: each that is one, or depends on one, directly or not.
+    private def reaching(packages : Array(Package)) : Array(String)
+      (direct + test_direct).select do |e|
+        closure = [e.package]
+        gather(e.package, closure)
+        closure.any? { |p| packages.includes?(p) }
+      end.map(&.key).uniq
     end
 
     # Collapses the versions of each package the project lists in `remaps`
@@ -385,7 +406,8 @@ module Zane
       ([package] + closure).each { |p| args.concat(project_imports(p, dependencies(p), remapped: false)) }
       error = IO::Memory.new
       unless compiler.run(args, error, error) == 0
-        raise UserError.new("the compiler could not build #{package.key} #{package.tag} (#{package.url}):\n#{error.to_s.strip}")
+        raise Unbuildable.new("the compiler could not build #{package.key} #{package.tag} (#{package.url}):\n#{error.to_s.strip}",
+          reaching([package]))
       end
     end
 

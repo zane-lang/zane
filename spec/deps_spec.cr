@@ -108,7 +108,7 @@ private class Registry
   end
 end
 
-DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
+DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_FAIL GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
 
 private def with_registry(&)
   base = Path[File.join(Dir.tempdir, "zane-spec-deps-#{Random::Secure.hex(6)}")]
@@ -168,6 +168,33 @@ DEPS_ZANEC = begin
   status = Process.run("crystal", ["build", "spec/support/fake_zanec.cr", "-o", path], error: Process::Redirect::Inherit)
   raise "cannot build the fake compiler" unless status.success?
   path
+end
+
+# Installs the fake compiler as the compiler release *tag*, which `zane
+# toolchain update` then finds installed rather than downloading it, and runs
+# that command in *project*.
+private def toolchain_update(registry : Registry, project : Path, tag : String) : {Int32, String, String}
+  dir = Zane::Home.toolchains / tag
+  Dir.mkdir_p(dir / "bin")
+  File.copy(DEPS_ZANEC, dir / "bin" / Zane::Compiler::EXECUTABLE)
+  File.write(dir / Zane::CompilerRelease::RECORD, "url #{Zane::CompilerRelease::URL}\ncommit #{"c" * 40}\n")
+  metadata = registry.dir / "compiler-#{tag}.json"
+  assets = ["zane-compiler-#{tag}-#{Zane::Toolchain.host}.tar.gz", "SHA256SUMS"].map { |name| {"name" => name} }
+  File.write(metadata, {"tag_name" => tag, "draft" => false, "assets" => assets}.to_json)
+  registry.downloads["#{Zane::Toolchain::API}/tags/#{tag}"] = metadata
+  resolve = Zane::Toolchain.resolve
+  Zane::Toolchain.resolve = ->(t : String) { Zane::CompilerRelease.new(t, "c" * 40) }
+  output, error = IO::Memory.new, IO::Memory.new
+  begin
+    status = Zane::Commands::ToolchainUpdate.new([tag], output, error, project).run
+  rescue e : Zane::UserError
+    error.puts e.message
+    status = 1
+  ensure
+    Zane::Toolchain.resolve = resolve
+    FileUtils.rm_rf(Zane::Home.toolchains)
+  end
+  {status, output.to_s, error.to_s}
 end
 
 private def entry(name : String, tag : String) : Path
@@ -490,6 +517,62 @@ describe Zane::Commands::Update do
       registry.downloads.delete(registry.downloads.keys.last)
       expect_raises(Zane::UserError, "404") { zane(["update", "math"], project) }
       deps_rows(project).should eq({"math" => {"version" => "v1.0", "from" => "release"}})
+    end
+  end
+end
+
+describe Zane::Commands::ToolchainUpdate do
+  it "moves the compiler and each dependency it cannot build as pinned together, to the newest version it builds" do
+    with_registry do |registry, project|
+      registry.publish("core", "v0.1")
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("core"), "--from-source"], project)[0].should eq 0
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      wanted = registry.publish("core", "v0.2", zane_version: "v0.3")
+      registry.publish("core", "v0.3", zane_version: "v0.4")
+      registry.publish("math", "v1.1")
+      # The compiler the dependency needs is named by the hint, and that is
+      # the command that moves both.
+      expect_raises(Zane::UserError, "`zane toolchain update v0.4` moves the project") { zane(["update", "core"], project) }
+      expect_raises(Zane::UserError, "`zane toolchain update v0.3` moves the project") { zane(["update", "core", "v0.2"], project) }
+      ENV["FAKE_ZANEC_FAIL"] = registry.id("core", "v0.1")
+      status, output, error = toolchain_update(registry, project, "v0.3")
+      {status, error}.should eq({0, ""})
+      output.should eq "Updated zane v0.1 -> v0.3 (commit #{"c" * 12}).\n" \
+                       "Updated core v0.1 -> v0.2 (commit #{wanted[0, 12]}), the newest version compiler v0.3 builds.\n"
+      read_coda(project / "zane.coda")["zane-version"].should eq "v0.3"
+      deps_rows(project).should eq({"core" => {"version" => "v0.2", "from" => "source"},
+                                    "math" => {"version" => "v1.0", "from" => "release"}})
+      lock_rows(project)["core"]["commit"].should eq wanted
+      lock_rows(project)["zane"]["commit"].should eq "c" * 40
+    end
+  end
+
+  it "moves a dependency that brings in a package of another major when the release named is of another" do
+    with_registry do |registry, project|
+      registry.publish("core", "v0.1")
+      registry.publish("shapes", "v1.0", deps: [{"core", "v0.1"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      registry.publish("core", "v1.0", zane_version: "v1.0")
+      wanted = registry.publish("shapes", "v2.0", deps: [{"core", "v1.0"}], zane_version: "v1.0")
+      status, output, _ = toolchain_update(registry, project, "v1.0")
+      status.should eq 0
+      output.should contain "Updated shapes v1.0 -> v2.0 (commit #{wanted[0, 12]})"
+      deps_rows(project).should eq({"shapes" => {"version" => "v2.0", "from" => "release"}})
+    end
+  end
+
+  it "writes nothing when no newer version of the dependency builds" do
+    with_registry do |registry, project|
+      registry.publish("core", "v0.1")
+      zane(["add", registry.url("core"), "--from-source"], project)[0].should eq 0
+      registry.publish("core", "v0.2", zane_version: "v0.4")
+      before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}
+      ENV["FAKE_ZANEC_FAIL"] = registry.id("core", "v0.1")
+      status, _, error = toolchain_update(registry, project, "v0.3")
+      status.should eq 1
+      error.should contain "the compiler could not build core v0.1"
+      {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
     end
   end
 end
