@@ -257,8 +257,8 @@ module Zane
       fixes = problems.compact_map(&.[1])
       hint = fixes.size == problems.size ? "; `zane toolchain update v#{major}.#{fixes.max}` moves the project to a compiler that builds them" : ""
       raise UserError.new("the project is built by compiler #{tag}, which builds every package it depends on: " \
-                          "#{problems.map(&.[0]).join("; ")}. A program is built by one compiler, so every package shares its major " \
-                          "and needs a compiler no newer than it#{hint}")
+                          "#{problems.map(&.[0]).join("; ")}. A program is built by one compiler, so every package must share " \
+                          "the project compiler's major and need a compiler no newer than it#{hint}")
     end
 
     # Collapses the versions of each package the project lists in `remaps`
