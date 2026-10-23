@@ -148,15 +148,28 @@ range the target system permits. A dependency's manifest has no say in either
 
 Builds a program package for the host into `out/run/<name>`, then runs it with
 `ARGS` and exits with its status. A project with several programs names the
-one to run. It does not optimize, which makes the build about three times
-faster; the program means the same either way, so only its speed differs from
-what `build` makes.
+one to run. Its build is the one that gives the program's result soonest,
+counting the build and the run together: the compiler's tiered build
+([compiler `tiers.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/tiers.md)).
+`zane` starts the optimized build, tier 1, in the background, builds the
+unoptimized one, tier 0, and runs it as soon as it is linked, with
+`ZANE_TIER_UP` naming tier 1's library beside it, `<name>.tier1.so`
+(`.dylib` on macOS, `.dll` on Windows). Tier 0 moves each of its functions to
+tier 1 once that library is there, so a short program never waits for the
+optimizer and a long one finishes on optimized code. A tier-1 build still
+going when the program ends is stopped, and what an earlier run left beside
+the program is removed before the build. The compiler keeps tier-1 libraries
+in its cache, so a program run again unchanged takes optimized code within
+its first moments. With a compiler release older than the first with tiers
+(§5), the program is built unoptimized. The program means the same in every
+case, so only its speed differs from what `build` makes.
 
 ### 2.5 `zane test [TEST] [-- ARGS]`
 
 Builds every test package in `test/`, or the one named by its directory under
 `test/`, such as `gui/opengl`, for the host into `out/test/`, and runs each
-with `ARGS`, unoptimized as `run` is. Each test package is the root of its
+with `ARGS`, each built and run as `run` builds and runs a program, so the
+two never differ. Each test package is the root of its
 own build, and the project's library packages are compiled with it
 ([`packages.md` §7.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#72-each-test-package-is-the-root-of-its-own-test-build)).
 The graph is the project's `deps` and `test-deps` together
@@ -350,6 +363,10 @@ which only `zane` reads off the directories, so the contract is:
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
   `T` is spelled as `zig cc` reads it; the compiler hands LLVM its normal
   form and the C compiler the triple as written.
+- **`--build OUT --tiered`** and **`--tier-up OUT`**, the two tiers `run`
+  and `test` build at once (§2.4): tier 0, an executable that loads the
+  library named by `ZANE_TIER_UP` while it runs, and tier 1, that library.
+  Both take the same packages and imports; tier 1 takes no `--link`.
 - A stamped dependency arrives as objects of its own, so the compiler emits
   nothing it declares. **`--link FILE`** adds one of them to `--build`'s
   link.
@@ -374,7 +391,9 @@ zane-lang/compiler#147, `--optimize` since #148, `--object` since #150,
 COFF, stamped `--package` names, `--import` and `--remap` since #156, and
 package paths, `_`-prefixed names, rootless library builds and imports
 through keys alone since #188, and `--fixed-region` and
-`--spawned-fixed-region` with the frames of #220.
+`--spawned-fixed-region` with the frames of #220. `--tiered` and `--tier-up`
+are in releases from 0.18 on, which `zane` reads off an installed toolchain's
+tag; a `zanec` found on `PATH` is taken to have them.
 
 `zane` passes each build its packages in this order: the first package, the
 project's library packages, then every version its graph links, each with its

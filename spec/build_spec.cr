@@ -9,7 +9,10 @@ FAKE_ZANEC = begin
 end
 
 # The variables a project example sets, restored after it.
-PROJECT_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS)
+PROJECT_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS FAKE_PROGRAM_TIER FAKE_TIER_HANG)
+
+# Where tier 1 of a program built into *path* goes (Commands::ProjectCommand#tier_library).
+TIER = {{ flag?(:win32) ? ".dll" : flag?(:darwin) ? ".dylib" : ".so" }}
 
 EXE = {{ flag?(:win32) ? ".exe" : "" }}
 
@@ -80,6 +83,12 @@ end
 
 private def logged(log : Path) : Array(String)
   File.exists?(log) ? File.read_lines(log) : [] of String
+end
+
+# The builds logged but each tier-1 build, which runs beside the rest and
+# may be stopped before it logs anything.
+private def built(log : Path) : Array(String)
+  logged(log).reject(&.starts_with?("--tier-up "))
 end
 
 describe Zane::Workspace do
@@ -281,7 +290,7 @@ describe Zane::Commands do
       zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
       zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
       regions = "--kind application --fixed-region 1073741824 --spawned-fixed-region 16777216 --package"
-      build, test = logged(log)
+      build, test = built(log)
       build.should start_with "--build #{root / "out" / "host" / "demo#{EXE}"} "
       build.should contain regions
       test.should start_with "--build #{root / "out" / "test"}"
@@ -311,7 +320,7 @@ describe Zane::Commands do
       zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
       zane(Zane::Commands::Check, [] of String, root)[0].should eq 0
       zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
-      lines = logged(log)
+      lines = built(log)
       lines.size.should eq 4
       build, test = lines.first, lines.last
       build.should start_with "--build #{root / "out" / "host" / "demo#{EXE}"} "
@@ -364,13 +373,42 @@ describe Zane::Commands do
     end
   end
 
-  it "runs the program, built unoptimized into out/run, with the arguments after --" do
+  it "runs the program, built in tiers into out/run, with the arguments after --" do
     with_project do |root, log|
       ENV["FAKE_PROGRAM_STATUS"] = "3"
+      ENV["FAKE_PROGRAM_TIER"] = (root / "tier").to_s
       zane(Zane::Commands::Run, ["--", "a", "--b"], root).should eq({3, "program ran with [a, --b]\n", ""})
       program = root / "out" / "run" / "demo#{EXE}"
-      logged(log).should eq ["--build #{program} --kind application --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"]
+      library = root / "out" / "run" / "demo.tier1#{TIER}"
+      flags = "--kind application --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"
+      logged(log).sort.should eq [
+        "--build #{program} --tiered #{flags}",
+        "--tier-up #{library} #{flags}",
+      ]
+      File.read(root / "tier").should eq library.to_s
     end
+  end
+
+  it "stops a tier-1 build still going when the program ends, and clears what an earlier one left" do
+    with_project do |root, log|
+      library = root / "out" / "run" / "demo.tier1#{TIER}"
+      Dir.mkdir_p(Path["#{library}.work"])
+      File.write(library, "stale")
+      File.write("#{library}.partial", "stale")
+      ENV["FAKE_TIER_HANG"] = "1"
+      started = Time.instant
+      zane(Zane::Commands::Run, [] of String, root)[0].should eq 0
+      (Time.instant - started).should be < 30.seconds
+      File.exists?(library).should be_false
+      File.exists?("#{library}.partial").should be_false
+      Dir.exists?(Path["#{library}.work"]).should be_false
+    end
+  end
+
+  it "builds in tiers only with a compiler release that has them" do
+    Zane::Compiler.tiered?("v0.17").should be_false
+    Zane::Compiler.tiered?("v0.18").should be_true
+    Zane::Compiler.tiered?("v1.0").should be_true
   end
 
   it "runs the program named, and asks for a name when there are several" do
@@ -379,7 +417,7 @@ describe Zane::Commands do
         zane(Zane::Commands::Run, [] of String, root)
       end
       zane(Zane::Commands::Run, ["tool"], root)[0].should eq 0
-      logged(log).should eq ["--build #{root / "out" / "run" / "tool#{EXE}"} --kind application --package tool=#{root / "bin" / "tool"} --import tool:tool=tool"]
+      built(log).should eq ["--build #{root / "out" / "run" / "tool#{EXE}"} --tiered --kind application --package tool=#{root / "bin" / "tool"} --import tool:tool=tool"]
     end
   end
 
@@ -387,7 +425,7 @@ describe Zane::Commands do
     with_project do |root|
       ENV["FAKE_ZANEC_STATUS"] = "1"
       zane(Zane::Commands::Run, [] of String, root)[0].should eq 1
-      Dir.children(root / "out" / "run").should be_empty
+      Dir.children(root / "out" / "run").reject(&.includes?(".tier1")).should be_empty
     end
   end
 
@@ -414,9 +452,9 @@ describe Zane::Commands do
         2 test packages passed.
 
         TEXT
-      logged(log).map(&.split(" --kind").first).should eq [
-        "--build #{root / "out" / "test" / "gui.opengl#{EXE}"}",
-        "--build #{root / "out" / "test" / "math#{EXE}"}",
+      built(log).map(&.split(" --kind").first).should eq [
+        "--build #{root / "out" / "test" / "gui.opengl#{EXE}"} --tiered",
+        "--build #{root / "out" / "test" / "math#{EXE}"} --tiered",
       ]
     end
   end
@@ -425,7 +463,7 @@ describe Zane::Commands do
     with_project(LAYOUT) do |root, log|
       ENV["FAKE_PROGRAM_STATUS"] = "4"
       zane(Zane::Commands::Test, ["gui/opengl/"], root).should eq({4, "program ran with []\n", ""})
-      logged(log).size.should eq 1
+      built(log).size.should eq 1
       expect_raises(Zane::UserError, "test/gui/ is no test package; the test packages are gui/opengl, math") do
         zane(Zane::Commands::Test, ["gui"], root)
       end

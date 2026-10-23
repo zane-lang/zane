@@ -149,17 +149,58 @@ module Zane::Commands
       flags.includes?("--import") ? flags : flags + ["--import", "#{id}:#{name}=#{id}"]
     end
 
-    # Builds *flags* for *target*, the host when nil, into *path*, linking
-    # *g*'s objects, and returns the compiler's exit status. A program means
-    # the same optimized or not, so *optimize* trades only build time for
-    # speed.
-    private def build(flags : Array(String), g : Graph, target : String?, path : Path, optimize : Bool) : Int32
+    # Builds *flags* optimized for *target*, the host when nil, into *path*,
+    # linking *g*'s objects, and returns the compiler's exit status.
+    private def build(flags : Array(String), g : Graph, target : String?, path : Path) : Int32
       Dir.mkdir_p(path.parent)
       args = ["--build", path.to_s]
       args.push("--target", target) if target
-      args << "--optimize" if optimize
+      args << "--optimize"
       links = g.objects(target || Target::HOST, compiler).flat_map { |o| ["--link", o.to_s] }
       compiler.run(args + flags + links, @output, @error)
+    end
+
+    # Builds *flags* for the host into *path* and runs it with *args*, as
+    # `run` and `test` do (docs/design/cli.md §2.4), returning its exit
+    # status, or the compiler's when the build failed. With a compiler that
+    # builds in tiers, the program starts as the faster build, tier 0,
+    # while tier 1, the program optimized, is built beside it into a library
+    # tier 0 loads once it is there. A tier-1 build still going when the
+    # program ends is stopped. Without tiers, the program is built
+    # unoptimized, the faster build.
+    private def build_and_run(flags : Array(String), g : Graph, path : Path, args : Array(String)) : Int32
+      Dir.mkdir_p(path.parent)
+      compiler = self.compiler
+      links = g.objects(Target::HOST, compiler).flat_map { |o| ["--link", o.to_s] }
+      run = ->(env : Hash(String, String)?) do
+        Compiler.launch(path.to_s, args, env: env,
+          input: Process::Redirect::Inherit, output: @output, error: @error)
+      end
+      unless compiler.tiered?
+        status = compiler.run(["--build", path.to_s] + flags + links, @output, @error)
+        return status == 0 ? run.call(nil) : status
+      end
+      library = tier_library(path)
+      tier1 = compiler.start(["--tier-up", library.to_s] + flags)
+      begin
+        status = compiler.run(["--build", path.to_s, "--tiered"] + flags + links, @output, @error)
+        status == 0 ? run.call({"ZANE_TIER_UP" => library.to_s}) : status
+      ensure
+        tier1.terminate unless tier1.terminated?
+        tier1.wait
+      end
+    end
+
+    # Where tier 1 of the program at *path* goes: a library beside it, named
+    # as the host names one. What an earlier build left there is removed
+    # first, so the program never loads a library of another build, and
+    # nor what a stopped build left half made.
+    private def tier_library(path : Path) : Path
+      extension = {% if flag?(:win32) %} ".dll" {% elsif flag?(:darwin) %} ".dylib" {% else %} ".so" {% end %}
+      library = path.parent / "#{path.basename(".exe")}.tier1#{extension}"
+      [library, Path["#{library}.partial"]].each { |f| File.delete?(f) }
+      FileUtils.rm_rf(Path["#{library}.work"])
+      library
     end
 
     # The program's file in `out/<dir>/`, named *name*, with `.exe` when
@@ -230,7 +271,7 @@ module Zane::Commands
       end
       chosen.each do |program|
         path = @path || output_in(@target || "host", program.name, @target)
-        status = build(program_build(program), graph, @target, path, optimize: true)
+        status = build(program_build(program), graph, @target, path)
         return status unless status == 0
         @output.puts "Built #{shown(path)}"
       end
@@ -243,9 +284,9 @@ module Zane::Commands
   end
 
   # `zane run [PROGRAM] [-- ARGS]` (§2.4): builds a program for the host
-  # without optimizing, which is the faster build, then runs it with *ARGS*
-  # and exits with its status. It builds into `out/run/`, so it never
-  # replaces what `zane build` made.
+  # and runs it with *ARGS*, starting it as soon as the faster build is
+  # made (`build_and_run`), and exits with its status. It builds into
+  # `out/run/`, so it never replaces what `zane build` made.
   class Run < ProjectCommand
     @program_args = [] of String
     @program : String? = nil
@@ -269,18 +310,14 @@ module Zane::Commands
         raise UserError.new("the project has #{chosen.size} programs, #{chosen.map(&.name).join(", ")}; name the one to run")
       end
       program = chosen.first
-      path = output_in("run", program.name, nil)
-      status = build(program_build(program), graph, nil, path, optimize: false)
-      return status unless status == 0
-      Compiler.launch(path.to_s, @program_args,
-        input: Process::Redirect::Inherit, output: @output, error: @error)
+      build_and_run(program_build(program), graph, output_in("run", program.name, nil), @program_args)
     end
   end
 
-  # `zane test [TEST] [-- ARGS]` (§2.5): builds each test package, or the
-  # one named as its directory under `test/` names it, for the host without
-  # optimizing, into `out/test/`, and runs it with *ARGS*. Each test package
-  # is the root of its own build (spec packages.md §7.2). It exits with the
+  # `zane test [TEST] [-- ARGS]` (§2.5): runs each test package, or the one
+  # named as its directory under `test/` names it, as `run` runs a program
+  # (`build_and_run`), into `out/test/`, with *ARGS*. Each test package is
+  # the root of its own build (spec packages.md §7.2). It exits with the
   # status of the one test it ran, or 1 when any of several failed.
   class Test < ProjectCommand
     @program_args = [] of String
@@ -324,11 +361,7 @@ module Zane::Commands
     end
 
     private def run_test(test : Layout::Test) : Int32
-      path = output_in("test", test.label.tr("/", "."), nil)
-      status = build(test_build(test), test_graph, nil, path, optimize: false)
-      return status unless status == 0
-      Compiler.launch(path.to_s, @program_args,
-        input: Process::Redirect::Inherit, output: @output, error: @error)
+      build_and_run(test_build(test), test_graph, output_in("test", test.label.tr("/", "."), nil), @program_args)
     end
 
     private def count(n : Int32) : String
