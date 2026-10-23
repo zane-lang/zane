@@ -60,7 +60,7 @@ private class Registry
 
   # Publishes *name* at *tag*, depending on *deps* (each a name and tag
   # published before), and returns the tag's commit.
-  def publish(name : String, tag : String, deps = [] of {String, String}, kind = "library",
+  def publish(name : String, tag : String, deps = [] of {String, String}, program = false,
               archive : Bytes? = nil, artifacts = true, package_name = name, pattern = "v*.+.++",
               zane_version = "v0.1") : String
     repo = @dir / name
@@ -70,7 +70,7 @@ private class Registry
     end
     FileUtils.rm_rf(repo / "lib")
     FileUtils.rm_rf(repo / "bin")
-    dir = kind == "library" ? repo / "lib" / package_name : repo / "bin" / package_name
+    dir = program ? repo / "bin" / package_name : repo / "lib" / package_name
     Dir.mkdir_p(dir)
     File.write(dir / "#{name}.zn", "package #{package_name};\n")
     File.write(repo / "zane.coda", <<-CODA)
@@ -313,7 +313,7 @@ describe Zane::Commands::Add do
       registry.fetched.should be_empty
       shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
       File.read_lines(log).last.should eq(
-        "--check --kind application --package app=#{project / "bin" / "app"} " \
+        "--check --root --package app=#{project / "bin" / "app"} " \
         "--package #{shapes}=#{entry("shapes", "v2.0") / "src" / "lib" / "shapes"} --package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} " \
         "--import #{shapes}:math=#{math} --import app:shapes=#{shapes}")
       zane(["build"], project)[0].should eq 0
@@ -329,7 +329,7 @@ describe Zane::Commands::Add do
       zane(["build"], project)[0].should eq 0
       zane(["build"], project)[0].should eq 0
       id = registry.id("math", "v1.0")
-      compiled = File.read_lines(log).select(&.starts_with?("--kind library --object"))
+      compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
       compiled.size.should eq 1
       compiled[0].should end_with "--package #{id}=#{entry("math", "v1.0") / "src" / "lib" / "math"}"
       object = entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST / "package.o"
@@ -350,7 +350,7 @@ describe Zane::Commands::Add do
       shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
       object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("shapes")).identity_hash / "v2.0" / "package.o"
       File.read_lines(log)[-2].should eq(
-        "--kind library --object #{object} --package #{shapes}=#{local / "lib" / "shapes"} " \
+        "--no-root --object #{object} --package #{shapes}=#{local / "lib" / "shapes"} " \
         "--package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} --import #{shapes}:math=#{math}")
       File.read_lines(log).last.should end_with(
         "--package #{shapes}=#{local / "lib" / "shapes"} --package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} " \
@@ -372,7 +372,7 @@ describe Zane::Commands::Add do
 
   it "refuses a project with no public library package, and builds no library without objects for the target" do
     with_registry do |registry, project|
-      registry.publish("tool", "v1.0", kind: "application")
+      registry.publish("tool", "v1.0", program: true)
       expect_raises(Zane::UserError, "has no public library package") { zane(["add", registry.url("tool")], project) }
       registry.publish("bare", "v1.0", artifacts: false)
       zane(["add", registry.url("bare")], project)[0].should eq 0
@@ -661,10 +661,10 @@ describe "test-deps" do
       FileUtils.rm_f(log)
       zane(["check"], project)[0].should eq 0
       File.read_lines(log).should eq [
-        "--check --kind library #{geo} --package #{math}=#{math_src} --import geo:math=#{math}",
-        "--check --kind application --package app=#{project / "bin" / "app"} #{geo} --package #{math}=#{math_src} " \
+        "--check --no-root #{geo} --package #{math}=#{math_src} --import geo:math=#{math}",
+        "--check --root --package app=#{project / "bin" / "app"} #{geo} --package #{math}=#{math_src} " \
         "--import geo:math=#{math} --import app:geo=geo --import app:math=#{math}",
-        "--check --kind application --package test=#{project / "test" / "geo"} #{geo} " \
+        "--check --root --package test=#{project / "test" / "geo"} #{geo} " \
         "--package #{probe}=#{probe_src} --package #{math}=#{math_src} " \
         "--import geo:math=#{math} --import test:geo=geo --import test:math=#{math} --import test:probe=#{probe}",
       ]

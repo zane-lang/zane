@@ -61,7 +61,7 @@ In a terminal, `init` asks these questions, showing the default for each:
 |---|---|---|
 | Create the project in `<absolute path>`? | yes | — |
 | Package name | the directory's name, converted to camelCase | the first package's directory |
-| Library or application? | application | whether it starts in `lib/` or `bin/` |
+| Library or application? | application | whether its first package is in `lib/` or `bin/`; it can add the other later |
 | Version pattern | `v*.+.++` | `version-pattern` |
 | Initialise a Git repository? | yes, unless already inside one | — |
 
@@ -302,7 +302,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed: the one program, or the one named when there are several. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
-What an application's release produces is not designed yet.
+What a release produces for a project's programs is not designed yet.
 
 ### 4.1 Installed toolchains
 
@@ -350,10 +350,12 @@ which only `zane` reads off the directories, so the contract is:
   through its keys alone, so an import the rules forbid is the compiler's
   error. A build whose packages import nothing gives the first package its
   own name as its key, so the rule still holds.
-- **`--kind application|library`**. An application's first package is the
-  root, and one without `main` is a compile-time error
+- **`--root`** or **`--no-root`**. A program's or a test's build passes
+  `--root`: its first package is the root, and one without `main` is a
+  compile-time error
   ([`packages.md` §6.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#62-main-is-the-entry-point)).
-  A library build has no root, so none of its packages reaches `@program$`.
+  A library build passes `--no-root` and has no root, so none of its
+  packages reaches `@program$`.
 - **`--fixed-region BYTES`** and **`--spawned-fixed-region BYTES`**: the
   size of the main thread of execution's range of frames and of each
   spawned call's, passed in bytes after converting the manifest's whole
@@ -392,8 +394,10 @@ COFF, stamped `--package` names, `--import` and `--remap` since #156, and
 package paths, `_`-prefixed names, rootless library builds and imports
 through keys alone since #188, and `--fixed-region` and
 `--spawned-fixed-region` with the frames of #220. `--tiered` and `--tier-up`
-are in releases from 0.18 on, which `zane` reads off an installed toolchain's
-tag; a `zanec` found on `PATH` is taken to have them.
+are in releases from 0.18 on, and `--root` and `--no-root` from 0.19 on, which
+`zane` reads off an installed toolchain's tag; an earlier release is passed
+`--kind application` or `--kind library` in their place. A `zanec` found on
+`PATH` is taken to have them all.
 
 `zane` passes each build its packages in this order: the first package, the
 project's library packages, then every version its graph links, each with its

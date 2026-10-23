@@ -104,7 +104,7 @@ module Zane::Commands
     # A library build, with no root, which checks every library package.
     private def library_build : Array(String)
       first = layout.libs.first
-      keyed(["--kind", "library"] + library_flags(graph), first.path, first.name)
+      keyed(compiler.root_flags(false) + library_flags(graph), first.path, first.name)
     end
 
     # How much memory each thread of execution's nested scopes may take, as
@@ -125,7 +125,7 @@ module Zane::Commands
     private def program_build(program : Layout::Program) : Array(String)
       g = graph
       own = layout.program_keys.map { |key, target| {key, target.path} }
-      flags = ["--kind", "application"] + region_flags + ["--package", "#{program.name}=#{program.dir}"] + library_flags(g) +
+      flags = compiler.root_flags(true) + region_flags + ["--package", "#{program.name}=#{program.dir}"] + library_flags(g) +
               g.keyed(program.name, own + g.public_keys(g.direct))
       keyed(flags, program.name, program.name)
     end
@@ -136,7 +136,7 @@ module Zane::Commands
     private def test_build(test : Layout::Test) : Array(String)
       g = test_graph
       own = layout.test_keys(test).map { |key, target| {key, target.path} }
-      flags = ["--kind", "application"] + region_flags + ["--package", "#{Project::TEST_PACKAGE}=#{test.dir}"] + library_flags(g) +
+      flags = compiler.root_flags(true) + region_flags + ["--package", "#{Project::TEST_PACKAGE}=#{test.dir}"] + library_flags(g) +
               g.keyed(Project::TEST_PACKAGE, own + g.public_keys(g.direct + g.test_direct))
       keyed(flags, Project::TEST_PACKAGE, Project::TEST_PACKAGE)
     end
