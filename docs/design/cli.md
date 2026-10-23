@@ -387,7 +387,8 @@ which only `zane` reads off the directories, so the contract is:
 
 `zane` passes these flags to every compiler alike. While the language is at
 major `0`, it drives only the compiler releases that take them, and a project
-pinned to an earlier one moves its pin with `zane toolchain update`
+pinned to an earlier one moves its pin to a release `zane` drives by naming
+that release's tag to `zane toolchain update`
 ([`dependencies.md` §14](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#14-toolchain-version)).
 
 `zane` passes each build its packages in this order: the first package, the
