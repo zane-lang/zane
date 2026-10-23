@@ -671,7 +671,7 @@ describe "test-deps" do
 
       File.delete(log)
       zane(["test"], project)[0].should eq 0
-      File.read_lines(log).last.should end_with(
+      File.read_lines(log).reject(&.starts_with?("--tier-up ")).last.should end_with(
         "--import test:probe=#{probe} " \
         "--link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"} " \
         "--link #{entry("probe", "v3.0") / "build" / Zane::Target::HOST / "probe.o"}")
