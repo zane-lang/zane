@@ -211,33 +211,6 @@ describe Zane::Commands::Init do
     end
   end
 
-  it "writes nothing for a library pinned to a compiler before v0.3" do
-    with_tmp do |tmp|
-      {"v0.0", "v0.1", "v0.2"}.each do |tag|
-        root = tmp / tag
-        expect_raises(Zane::UserError, "the library template requires compiler v0.3 or newer; selected #{tag}") do
-          init([root.to_s, "--lib", "--name", "geometry", "--zane-version", tag])
-        end
-        File.exists?(root).should be_false
-      end
-    end
-  end
-
-  it "leaves an existing directory untouched when the newest installed compiler is too old for a library" do
-    with_tmp do |tmp|
-      with_toolchains do
-        offline = "https://zane.invalid/compiler"
-        install("v0.2", V01, url: offline)
-        File.write(tmp / "README.md", "# geometry\n")
-        expect_raises(Zane::UserError, "the library template requires compiler v0.3 or newer; selected v0.2") do
-          init([tmp.to_s, "--lib", "--name", "geometry"], url: offline)
-        end
-        Dir.children(tmp).should eq ["README.md"]
-        File.read(tmp / "README.md").should eq "# geometry\n"
-      end
-    end
-  end
-
   it "accepts newer minor and major compiler versions for a library without going online" do
     with_tmp do |tmp|
       with_toolchains do

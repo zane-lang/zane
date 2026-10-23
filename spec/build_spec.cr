@@ -405,22 +405,6 @@ describe Zane::Commands do
     end
   end
 
-  it "builds in tiers only with a compiler release that has them" do
-    Zane::Compiler.tiered?("v0.17").should be_false
-    Zane::Compiler.tiered?("v0.18").should be_true
-    Zane::Compiler.tiered?("v1.0").should be_true
-  end
-
-  it "says whether a build has a root as the compiler release asks" do
-    Zane::Compiler.rooted?("v0.18").should be_false
-    Zane::Compiler.rooted?("v0.19").should be_true
-    Zane::Compiler.rooted?("v1.0").should be_true
-    Zane::Compiler.new("zanec").root_flags(true).should eq ["--root"]
-    Zane::Compiler.new("zanec").root_flags(false).should eq ["--no-root"]
-    Zane::Compiler.new("zanec", rooted: false).root_flags(true).should eq ["--kind", "application"]
-    Zane::Compiler.new("zanec", rooted: false).root_flags(false).should eq ["--kind", "library"]
-  end
-
   it "runs the program named, and asks for a name when there are several" do
     with_project({"bin/demo/main.zn" => "package demo;\n", "bin/tool/main.zn" => "package tool;\n"}) do |root, log|
       expect_raises(Zane::UserError, "the project has 2 programs, demo, tool; name the one to run") do

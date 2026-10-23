@@ -109,8 +109,8 @@ module Zane::Commands
 
     # How much memory each thread of execution's nested scopes may take, as
     # the project's own manifest sets it, for the programs it builds (spec
-    # memory.md §3.7). Only a field the manifest gives is passed, so a
-    # project that sets neither builds with any compiler.
+    # memory.md §3.7). Only a field the manifest gives is passed; the
+    # compiler's default stands for one it omits.
     private def region_flags : Array(String)
       flags = [] of String
       m = workspace.manifest
@@ -162,29 +162,21 @@ module Zane::Commands
 
     # Builds *flags* for the host into *path* and runs it with *args*, as
     # `run` and `test` do (docs/design/cli.md §2.4), returning its exit
-    # status, or the compiler's when the build failed. With a compiler that
-    # builds in tiers, the program starts as the faster build, tier 0,
-    # while tier 1, the program optimized, is built beside it into a library
-    # tier 0 loads once it is there. A tier-1 build still going when the
-    # program ends is stopped. Without tiers, the program is built
-    # unoptimized, the faster build.
+    # status, or the compiler's when the build failed. The program starts as
+    # the faster build, tier 0, while tier 1, the program optimized, is built
+    # beside it into a library tier 0 loads once it is there. A tier-1 build
+    # still going when the program ends is stopped.
     private def build_and_run(flags : Array(String), g : Graph, path : Path, args : Array(String)) : Int32
       Dir.mkdir_p(path.parent)
       compiler = self.compiler
       links = g.objects(Target::HOST, compiler).flat_map { |o| ["--link", o.to_s] }
-      run = ->(env : Hash(String, String)?) do
-        Compiler.launch(path.to_s, args, env: env,
-          input: Process::Redirect::Inherit, output: @output, error: @error)
-      end
-      unless compiler.tiered?
-        status = compiler.run(["--build", path.to_s] + flags + links, @output, @error)
-        return status == 0 ? run.call(nil) : status
-      end
       library = tier_library(path)
       tier1 = compiler.start(["--tier-up", library.to_s] + flags)
       begin
         status = compiler.run(["--build", path.to_s, "--tiered"] + flags + links, @output, @error)
-        status == 0 ? run.call({"ZANE_TIER_UP" => library.to_s}) : status
+        return status unless status == 0
+        Compiler.launch(path.to_s, args, env: {"ZANE_TIER_UP" => library.to_s},
+          input: Process::Redirect::Inherit, output: @output, error: @error)
       ensure
         tier1.terminate unless tier1.terminated?
         tier1.wait

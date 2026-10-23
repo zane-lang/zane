@@ -160,9 +160,8 @@ optimizer and a long one finishes on optimized code. A tier-1 build still
 going when the program ends is stopped, and what an earlier run left beside
 the program is removed before the build. The compiler keeps tier-1 libraries
 in its cache, so a program run again unchanged takes optimized code within
-its first moments. With a compiler release older than the first with tiers
-(§5), the program is built unoptimized. The program means the same in every
-case, so only its speed differs from what `build` makes.
+its first moments. The program means the same either way, so only its speed
+differs from what `build` makes.
 
 ### 2.5 `zane test [TEST] [-- ARGS]`
 
@@ -360,8 +359,7 @@ which only `zane` reads off the directories, so the contract is:
   size of the main thread of execution's range of frames and of each
   spawned call's, passed in bytes after converting the manifest's whole
   number of `MiB` or `GiB`. `zane` passes them only for a
-  manifest that sets them, so a project that sets neither builds with a
-  compiler that predates them.
+  manifest that sets them; the compiler's default stands for the other.
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
   `T` is spelled as `zig cc` reads it; the compiler hands LLVM its normal
   form and the C compiler the triple as written.
@@ -387,17 +385,10 @@ which only `zane` reads off the directories, so the contract is:
   package stamped `TO`, for remapping
   ([`dependencies.md` §15.6](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#156-mechanism-reuses-pull-time-rewriting)).
 
-`zanec` has `--check`, `--build` and `--target` since
-zane-lang/compiler#147, `--optimize` since #148, `--object` since #150,
-`--link` since #151, `--rewrite` since #152 for ELF and #153 for Mach-O and
-COFF, stamped `--package` names, `--import` and `--remap` since #156, and
-package paths, `_`-prefixed names, rootless library builds and imports
-through keys alone since #188, and `--fixed-region` and
-`--spawned-fixed-region` with the frames of #220. `--tiered` and `--tier-up`
-are in releases from 0.18 on, and `--root` and `--no-root` from 0.19 on, which
-`zane` reads off an installed toolchain's tag; an earlier release is passed
-`--kind application` or `--kind library` in their place. A `zanec` found on
-`PATH` is taken to have them all.
+`zane` passes these flags to every compiler alike. While the language is at
+major `0`, it drives only the compiler releases that take them, and a project
+pinned to an earlier one moves its pin with `zane toolchain update`
+([`dependencies.md` §14](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#14-toolchain-version)).
 
 `zane` passes each build its packages in this order: the first package, the
 project's library packages, then every version its graph links, each with its
