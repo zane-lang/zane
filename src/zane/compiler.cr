@@ -8,22 +8,16 @@ module Zane
   class Compiler
     EXECUTABLE = {% if flag?(:win32) %} "zanec.exe" {% else %} "zanec" {% end %}
 
-    # The first compiler release that builds in tiers (compiler
-    # docs/design/tiers.md): `--build OUT --tiered` and `--tier-up OUT`.
-    TIERED_SINCE = {0, 18}
-
     getter path : String
 
-    # Whether `run` and `test` build in tiers with this compiler (§2.4).
-    getter? tiered : Bool
-
-    def initialize(@path : String, @tiered : Bool = true)
+    def initialize(@path : String)
     end
 
-    # Whether the compiler release *tag* builds in tiers.
-    def self.tiered?(tag : String) : Bool
-      version = CompilerRelease.version(tag)
-      !version.nil? && (version <=> TIERED_SINCE) >= 0
+    # The flag that says whether a build has a root package: a program's or
+    # a test's build has one, a library build has none (spec packages.md
+    # §6.1).
+    def root_flags(root : Bool) : Array(String)
+      [root ? "--root" : "--no-root"]
     end
 
     # The compiler for a project built by *zane_version*, from the first of:
@@ -36,7 +30,7 @@ module Zane
       end
       installed = toolchains / zane_version / "bin" / EXECUTABLE
       if CompilerRelease.installed(toolchains).has_key?(zane_version) && File.file?(installed)
-        return new(installed.to_s, tiered?(zane_version))
+        return new(installed.to_s)
       end
       if found = Process.find_executable("zanec")
         return new(found)

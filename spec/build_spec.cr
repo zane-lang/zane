@@ -222,12 +222,12 @@ describe Zane::Commands do
       zane(Zane::Commands::Check, [] of String, root / "lib").should eq({0, "", ""})
       libs = library_flags(root)
       logged(log).should eq [
-        "--check --kind library #{libs}",
-        "--check --kind application --package viewer=#{root / "bin" / "viewer"} #{libs} " \
+        "--check --no-root #{libs}",
+        "--check --root --package viewer=#{root / "bin" / "viewer"} #{libs} " \
         "--import viewer:_shaders=_shaders --import viewer:gui=gui --import viewer:math=math",
-        "--check --kind application --package test=#{root / "test" / "gui" / "opengl"} #{libs} " \
+        "--check --root --package test=#{root / "test" / "gui" / "opengl"} #{libs} " \
         "--import test:_shaders=_shaders --import test:gui=gui --import test:math=math --import test:opengl=gui.opengl",
-        "--check --kind application --package test=#{root / "test" / "math"} #{libs} " \
+        "--check --root --package test=#{root / "test" / "math"} #{libs} " \
         "--import test:_shaders=_shaders --import test:gui=gui --import test:math=math",
       ]
     end
@@ -236,7 +236,7 @@ describe Zane::Commands do
   it "gives a build whose packages import nothing its first package's own name, so it is held to its keys" do
     with_project do |root, log|
       zane(Zane::Commands::Check, [] of String, root).should eq({0, "", ""})
-      logged(log).should eq ["--check --kind application --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"]
+      logged(log).should eq ["--check --root --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"]
     end
   end
 
@@ -257,7 +257,7 @@ describe Zane::Commands do
       File.exists?(host).should be_true
       zane(Zane::Commands::Build, ["--target", "aarch64-unknown-linux-gnu"], root)[0].should eq 0
       zane(Zane::Commands::Build, ["--target", "x86_64-pc-windows-msvc"], root)[0].should eq 0
-      flags = "--kind application --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"
+      flags = "--root --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"
       logged(log).should eq [
         "--build #{host} --optimize #{flags}",
         "--build #{root / "out" / "aarch64-unknown-linux-gnu" / "demo"} --target aarch64-unknown-linux-gnu --optimize #{flags}",
@@ -277,7 +277,7 @@ describe Zane::Commands do
         zane(Zane::Commands::Build, ["-o", (root / "x").to_s], root)
       end
       zane(Zane::Commands::Build, ["tool", "-o", (root / "elsewhere" / "prog").to_s], root)[0].should eq 0
-      logged(log).last.should start_with "--build #{root / "elsewhere" / "prog"} --optimize --kind application --package tool="
+      logged(log).last.should start_with "--build #{root / "elsewhere" / "prog"} --optimize --root --package tool="
       expect_raises(Zane::UserError, "bin/nope/ is no program; the programs are demo, tool") do
         zane(Zane::Commands::Build, ["nope"], root)
       end
@@ -289,7 +289,7 @@ describe Zane::Commands do
     with_project(files, fields: "fixed-region 1GiB\nspawned-fixed-region 16MiB") do |root, log|
       zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
       zane(Zane::Commands::Test, [] of String, root)[0].should eq 0
-      regions = "--kind application --fixed-region 1073741824 --spawned-fixed-region 16777216 --package"
+      regions = "--root --fixed-region 1073741824 --spawned-fixed-region 16777216 --package"
       build, test = built(log)
       build.should start_with "--build #{root / "out" / "host" / "demo#{EXE}"} "
       build.should contain regions
@@ -298,7 +298,7 @@ describe Zane::Commands do
     end
     with_project(files, fields: "spawned-fixed-region 2MiB") do |root, log|
       zane(Zane::Commands::Build, [] of String, root)[0].should eq 0
-      logged(log).first.should contain "--kind application --spawned-fixed-region 2097152 --package demo="
+      logged(log).first.should contain "--root --spawned-fixed-region 2097152 --package demo="
     end
   end
 
@@ -380,7 +380,7 @@ describe Zane::Commands do
       zane(Zane::Commands::Run, ["--", "a", "--b"], root).should eq({3, "program ran with [a, --b]\n", ""})
       program = root / "out" / "run" / "demo#{EXE}"
       library = root / "out" / "run" / "demo.tier1#{TIER}"
-      flags = "--kind application --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"
+      flags = "--root --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"
       logged(log).sort.should eq [
         "--build #{program} --tiered #{flags}",
         "--tier-up #{library} #{flags}",
@@ -405,19 +405,13 @@ describe Zane::Commands do
     end
   end
 
-  it "builds in tiers only with a compiler release that has them" do
-    Zane::Compiler.tiered?("v0.17").should be_false
-    Zane::Compiler.tiered?("v0.18").should be_true
-    Zane::Compiler.tiered?("v1.0").should be_true
-  end
-
   it "runs the program named, and asks for a name when there are several" do
     with_project({"bin/demo/main.zn" => "package demo;\n", "bin/tool/main.zn" => "package tool;\n"}) do |root, log|
       expect_raises(Zane::UserError, "the project has 2 programs, demo, tool; name the one to run") do
         zane(Zane::Commands::Run, [] of String, root)
       end
       zane(Zane::Commands::Run, ["tool"], root)[0].should eq 0
-      built(log).should eq ["--build #{root / "out" / "run" / "tool#{EXE}"} --tiered --kind application --package tool=#{root / "bin" / "tool"} --import tool:tool=tool"]
+      built(log).should eq ["--build #{root / "out" / "run" / "tool#{EXE}"} --tiered --root --package tool=#{root / "bin" / "tool"} --import tool:tool=tool"]
     end
   end
 
@@ -452,7 +446,7 @@ describe Zane::Commands do
         2 test packages passed.
 
         TEXT
-      built(log).map(&.split(" --kind").first).should eq [
+      built(log).map(&.split(" --root").first).should eq [
         "--build #{root / "out" / "test" / "gui.opengl#{EXE}"} --tiered",
         "--build #{root / "out" / "test" / "math#{EXE}"} --tiered",
       ]
@@ -500,7 +494,7 @@ describe Zane::Commands do
       zane(Zane::Commands::Inspect, ["cgt"], root)[0].should eq 0
       zane(Zane::Commands::Inspect, ["cgt", "demo", "--optimize"], root)[0].should eq 0
       zane(Zane::Commands::Inspect, ["ll", "--target", "x86_64-windows-gnu"], root)[0].should eq 0
-      flags = "--kind application --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"
+      flags = "--root --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"
       logged(log).should eq [
         "--cgt #{flags}",
         "--cgt --optimize #{flags}",
@@ -540,7 +534,7 @@ describe Zane::Commands do
         zane(Zane::Commands::Inspect, ["tst"], root)
       end
       zane(Zane::Commands::Inspect, ["tst", "tool"], root)[0].should eq 0
-      logged(log).should eq ["--tst --kind application --package tool=#{root / "bin" / "tool"} --import tool:tool=tool"]
+      logged(log).should eq ["--tst --root --package tool=#{root / "bin" / "tool"} --import tool:tool=tool"]
     end
   end
 

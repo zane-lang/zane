@@ -377,7 +377,7 @@ module Zane
     private def compile(package : Package, target : String, compiler : Compiler, dest : Path) : Nil
       closure = [] of Package
       gather(package, closure)
-      args = ["--kind", "library", "--object", dest.to_s]
+      args = compiler.root_flags(false) + ["--object", dest.to_s]
       args.push("--target", target) unless target == Target::HOST
       ([package] + closure).each do |p|
         p.layout.libs.each { |l| args.push("--package", "#{p.id(l)}=#{l.dir}") }
