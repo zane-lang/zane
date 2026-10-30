@@ -3,7 +3,9 @@
 # a line naming both stamps followed by the input. As a compiler (any run
 # given `--package`) it appends its arguments to the file `FAKE_ZANEC_LOG`
 # names, exits with `FAKE_ZANEC_STATUS`, for `--build OUT` copies itself to
-# OUT, and for `--object OUT` writes its arguments to OUT. For
+# OUT, and for `--object OUT` writes its arguments to OUT, and with
+# `FAKE_ZANEC_C` set, writes beside it what a package's C adds: `STEM.c.0.o`
+# and `STEM.c.hashes`. For
 # `--tier-up OUT` it writes OUT once it has logged, unless `FAKE_TIER_HANG`
 # is set, when it never finishes.
 # Run as that program, it prints its arguments and exits with
@@ -35,6 +37,11 @@ elsif ARGV.includes?("--package")
   end
   if i = ARGV.index("--object")
     File.write(ARGV[i + 1], "object #{ARGV.join(" ")}")
+    if ENV["FAKE_ZANEC_C"]?
+      stem = Path[ARGV[i + 1]].parent / Path[ARGV[i + 1]].stem
+      File.write("#{stem}.c.0.o", "assembled")
+      File.write("#{stem}.c.hashes", "hashes")
+    end
   end
   if i = ARGV.index("--tier-up")
     sleep 1.hour if ENV["FAKE_TIER_HANG"]?
