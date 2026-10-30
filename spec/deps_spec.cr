@@ -359,6 +359,21 @@ describe Zane::Commands::Add do
     end
   end
 
+  it "links only what the last build of a path dependency wrote" do
+    with_registry do |registry, project, log|
+      ENV["FAKE_ZANEC_C"] = "1"
+      commit = registry.publish("shapes", "v2.0")
+      local = registry.dir / "shapes"
+      File.write(project / "zane.coda", File.read(project / "zane.coda").sub("]", "    shapes v2.0 #{local.relative_to(project).to_posix}\n]"))
+      File.write(project / "zane-lock.coda", File.read(project / "zane-lock.coda").sub(/\]\n\z/, "    shapes #{registry.url("shapes")} #{commit}\n]\n"))
+      zane(["build"], project)[0].should eq 0
+      File.read_lines(log).last.should contain("package.c.0.o")
+      ENV.delete("FAKE_ZANEC_C")
+      zane(["build"], project)[0].should eq 0
+      File.read_lines(log).last.should_not contain("package.c.")
+    end
+  end
+
   it "resolves what a library depends on, which is linked too" do
     with_registry do |registry, project, log|
       registry.publish("math", "v1.0")

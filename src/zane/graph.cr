@@ -388,6 +388,8 @@ module Zane
           entry.not_nil!.compiled(p.commit, target, @workspace.toolchain) { |dest| compile(p, target, compiler, dest) }
         in .path?
           dest = @workspace.out_dir / "deps" / target / p.url.identity_hash / p.tag / "package.o"
+          # The directory holds only this build's files, which are all linked.
+          FileUtils.rm_rf(dest.parent)
           Dir.mkdir_p(dest.parent)
           compile(p, target, compiler, dest)
           Dir.children(dest.parent).sort.map { |n| dest.parent / n }.select { |f| File.file?(f) }

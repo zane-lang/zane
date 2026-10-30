@@ -264,7 +264,8 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   `build-from-source/<target>.coda` records the commit, target and compiler
   pin it was compiled with, and the object is reused only while all four
   match. A path dependency is compiled the same way on every build, into the
-  project's `out/deps/<target>/`, and never enters the cache
+  project's `out/deps/<target>/`, emptied first so it holds only that
+  build's files, and never enters the cache
   ([§12.2](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#122-local-path-dependencies)).
 - **Remapping.** For each URL in `remaps`, the versions in the graph are
   grouped by the `version-pattern` each one's manifest declares, and within
