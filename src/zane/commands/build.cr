@@ -156,7 +156,7 @@ module Zane::Commands
       args = ["--build", path.to_s]
       args.push("--target", target) if target
       args << "--optimize"
-      links = g.objects(target || Target::HOST, compiler).flat_map { |o| ["--link", o.to_s] }
+      links = g.link_flags(target || Target::HOST, compiler, hashes: true)
       compiler.run(args + flags + links, @output, @error)
     end
 
@@ -169,7 +169,7 @@ module Zane::Commands
     private def build_and_run(flags : Array(String), g : Graph, path : Path, args : Array(String)) : Int32
       Dir.mkdir_p(path.parent)
       compiler = self.compiler
-      links = g.objects(Target::HOST, compiler).flat_map { |o| ["--link", o.to_s] }
+      links = g.link_flags(Target::HOST, compiler, hashes: false)
       library = tier_library(path)
       tier1 = compiler.start(["--tier-up", library.to_s] + flags)
       begin

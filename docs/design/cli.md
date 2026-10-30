@@ -250,15 +250,16 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   It then unpacks the archive into `artifacts/<target>/build/`, refusing it
   whole if any entry is not a directory or regular file under `build/`.
 - **Rewriting.** `zanec --rewrite` (§5) turns each object's placeholder into
-  the package's stamp, into `build/<target>/`. Last, `zane` writes
+  the package's stamp, into `build/<target>/`, and stamps the packages of
+  the file of C module hashes beside them. Last, `zane` writes
   `build/<target>.coda`, recording the commit, target, archive hash and
   compiler pin (`zane-version` and the `zane` lock row's commit) the objects
   were made with. The objects are reused only while all five match;
   otherwise they are rewritten again, from the kept archive when its hash
   still matches.
 - **Compiling from source.** A `source` dependency is compiled on its own
-  from its checkout, into `build-from-source/<target>/package.o`, named with
-  its stamp, against the versions its own lock file pins
+  from its checkout, into `build-from-source/<target>/package.o`, with the
+  files the compiler writes beside it (§5), named with its stamp, against the versions its own lock file pins
   ([§12.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#121-source-compilation-is-explicit-opt-in)).
   `build-from-source/<target>.coda` records the commit, target and compiler
   pin it was compiled with, and the object is reused only while all four
@@ -279,7 +280,8 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
 - **Linking.** The compiler is given each version linked with
   `--package STAMPNAME=DIR`, each package's keys, the project's included,
   with `--import`, and every object with `--link`
-  ([compiler `separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md) C10).
+  ([compiler `separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md) C10),
+  and, for `build`, each file of C module hashes with `--c-hashes`.
   Each version is a package of its own, so versions of one package, and
   packages of one name, are linked side by side
   ([§11](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#11-multiple-version-coexistence)),
@@ -294,7 +296,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 
 | Command | Does |
 |---|---|
-| `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has the compiler its `zane-version` names write their `!`-prefixed objects for each target, packs one archive per target, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
+| `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has the compiler its `zane-version` names write their `!`-prefixed objects for each target, with the files it writes beside them (§5), packs one archive per target of all of them, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
 | `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and the `zane` lock row's commit together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than the lock row pins has moved, and is refused with a security error without the flag. |
@@ -369,15 +371,23 @@ which only `zane` reads off the directories, so the contract is:
   Both take the same packages and imports; tier 1 takes no `--link`.
 - A stamped dependency arrives as objects of its own, so the compiler emits
   nothing it declares. **`--link FILE`** adds one of them to `--build`'s
-  link.
+  link, and **`--c-hashes FILE`** names the file of its C modules' hashes,
+  which an optimized build compares before it inlines the dependency's C
+  ([compiler `ffi.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/ffi.md) F13).
+  A tiered build inlines none, so `run` and `test` pass no `--c-hashes`.
 - **`--object OUT`** writes the object of every library package of the
   project being compiled, the packages that share the first one's stamp,
   every symbol they define under the `!` placeholder, or under their stamp
-  when they have one.
+  when they have one. Beside `OUT` it writes `STEM.c.N.o`, an object for
+  each C source holding assembly, and `STEM.c.hashes`, the hashes of the
+  packages' C modules, `STEM` being `OUT` without its extension
+  ([compiler `ffi.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/ffi.md) F15);
+  each is as much the package's as the object is.
   `zane release` packs the first (§4), and a dependency compiled from source
   or a path is the second (§3.1).
 - **`--rewrite STAMP INPUT OUTPUT`** writes the object `INPUT` with every `!`
-  in its symbols replaced by `STAMP`, for ELF, Mach-O and COFF objects. It is
+  in its symbols replaced by `STAMP`, for ELF, Mach-O and COFF objects, and
+  a file of C module hashes with every `!` of its packages replaced so. It is
   the compiler's step because the symbol spelling is the compiler's, so the
   pinned compiler rewrites what that same version built.
 - **`--remap FROM TO INPUT OUTPUT`** writes the object `INPUT` with every

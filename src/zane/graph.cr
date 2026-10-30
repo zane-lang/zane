@@ -348,11 +348,36 @@ module Zane
       keys.flat_map { |key, target| ["--import", "#{from}:#{key}=#{target}"] }
     end
 
+    # The name the compiler gives the file of an object's C modules'
+    # hashes (compiler docs/design/ffi.md F15).
+    HASHES = ".c.hashes"
+
+    # Whether *file* is one of those, not an object.
+    def self.hashes?(file : Path) : Bool
+      file.basename.ends_with?(HASHES)
+    end
+
+    # The compiler's flags for *target*'s objects: `--link` for each, and,
+    # when *hashes*, `--c-hashes` for each file of C module hashes beside
+    # them, which only an optimized build reads (F13).
+    def link_flags(target : String, compiler : Compiler, hashes : Bool) : Array(String)
+      objects(target, compiler).flat_map do |o|
+        if Graph.hashes?(o)
+          hashes ? ["--c-hashes", o.to_s] : [] of String
+        else
+          ["--link", o.to_s]
+        end
+      end
+    end
+
     # The objects for *target* that a program links: each release's
     # objects, fetched, verified and rewritten (§13 steps 6 to 8), and each
     # `source` and path dependency compiled on its own with its stamp (§12).
     # When remapping displaced a version, each object's references to it
-    # are moved to its chosen one (§15.6).
+    # are moved to its chosen one (§15.6). Beside a package's objects is
+    # the file of its C modules' hashes, when its C has any, which the
+    # compiler compares before it inlines the package's C (compiler
+    # docs/design/ffi.md F13, F15); it carries no symbols to remap.
     def objects(target : String, compiler : Compiler) : Array(Path)
       objects = linked.flat_map do |p|
         entry = p.entry
@@ -360,12 +385,12 @@ module Zane
         in .release?
           entry.not_nil!.objects(p.commit, target, compiler, @workspace.toolchain)
         in .source?
-          [entry.not_nil!.compiled(p.commit, target, @workspace.toolchain) { |dest| compile(p, target, compiler, dest) }]
+          entry.not_nil!.compiled(p.commit, target, @workspace.toolchain) { |dest| compile(p, target, compiler, dest) }
         in .path?
           dest = @workspace.out_dir / "deps" / target / p.url.identity_hash / p.tag / "package.o"
           Dir.mkdir_p(dest.parent)
           compile(p, target, compiler, dest)
-          [dest]
+          Dir.children(dest.parent).sort.map { |n| dest.parent / n }.select { |f| File.file?(f) }
         end
       end
       @chosen.empty? ? objects : remapped(objects, target, compiler)
@@ -408,6 +433,7 @@ module Zane
       Dir.mkdir_p(dir)
       pairs = @chosen.map { |node, chosen| {@nodes[node].stamp, chosen.stamp} }
       objects.map_with_index do |object, i|
+        next object if Graph.hashes?(object)
         dest = dir / "#{i}-#{object.basename}"
         input = object
         # Each pass writes a file of its own, so no pass reads what it writes.

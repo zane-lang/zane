@@ -19,7 +19,10 @@ module Zane
   #   build/<target>/           those objects, rewritten
   #   build/<target>.coda       what they were rewritten from, and with
   #   build-from-source/<target>/package.o
-  #                             the object compiled from src/ (§12.1)
+  #                             the object compiled from src/ (§12.1), and
+  #                             what the compiler writes beside it: the
+  #                             objects of its C holding assembly and the
+  #                             file of its C modules' hashes
   #   build-from-source/<target>.coda
   #                             what it was compiled from, and with
   # ```
@@ -111,18 +114,18 @@ module Zane
     end
 
     # The object compiled from the checkout of *commit* for *target*, for a
-    # dependency compiled from source (§12.1). It is kept apart from the
-    # release's objects, and reused only while it was compiled from the same
-    # commit by the same compiler pin, *toolchain*. The block compiles it to
-    # the path it is given.
-    def compiled(commit : String, target : String, toolchain : {String, String}, & : Path ->) : Path
+    # dependency compiled from source (§12.1), with what the compiler wrote
+    # beside it. It is kept apart from the release's objects, and reused
+    # only while it was compiled from the same commit by the same compiler
+    # pin, *toolchain*. The block compiles it to the path it is given.
+    def compiled(commit : String, target : String, toolchain : {String, String}, & : Path ->) : Array(Path)
       dir = @dir / "build-from-source"
       built = dir / target
       object = built / "package.o"
       record = dir / "#{target}.coda"
       wanted = {"commit" => commit, "target" => target,
                 "zane-version" => toolchain[0], "zane-commit" => toolchain[1]}
-      return object if File.file?(object) && read_record(record) == wanted
+      return files(built) if File.file?(object) && read_record(record) == wanted
 
       source(commit)
       Dir.mkdir_p(dir)
@@ -132,7 +135,7 @@ module Zane
       FileUtils.rm_rf(built)
       File.rename(partial, built)
       write_record(record, wanted)
-      object
+      files(built)
     ensure
       FileUtils.rm_rf(partial) if partial && Dir.exists?(partial)
     end
@@ -154,8 +157,10 @@ module Zane
       originals
     end
 
-    # Rewrites every object under *originals* into the same place under
-    # *built*.
+    # Rewrites every file under *originals* into the same place under
+    # *built*: the objects, and the file of their C modules' hashes, whose
+    # packages the compiler stamps as it stamps the objects (compiler
+    # docs/design/ffi.md F15).
     private def rewrite(originals : Path, built : Path, compiler : Compiler) : Nil
       partial = built.parent / ".#{built.basename}.#{Random::Secure.hex(4)}"
       stamp = @url.stamp(@tag)

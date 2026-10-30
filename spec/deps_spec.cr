@@ -108,7 +108,7 @@ private class Registry
   end
 end
 
-DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
+DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_ZANEC_C GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
 
 private def with_registry(&)
   base = Path[File.join(Dir.tempdir, "zane-spec-deps-#{Random::Secure.hex(6)}")]
@@ -301,6 +301,61 @@ describe Zane::Commands::Add do
         "--import app:math=#{id} --link #{math / "build" / Zane::Target::HOST / "math.o"}")
       registry.fetched.size.should eq 1
       File.read_lines(log).count(&.starts_with?("--rewrite")).should eq 1
+    end
+  end
+
+  it "links a release's objects of its C and gives an optimized build its C module hashes" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0", archive: tar_gz([
+        {"build/", '5', ""}, {"build/math.o", '0', "object"}, {"build/math.c.0.o", '0', "assembled"},
+        {"build/math.c.hashes", '0', "hashes"},
+      ]))
+      zane(["add", registry.url("math"), "v1.0"], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+      built = entry("math", "v1.0") / "build" / Zane::Target::HOST
+      stamp = registry.stamp("math", "v1.0")
+      File.read(built / "math.c.hashes").should eq "rewritten #{stamp}\nhashes"
+      File.read_lines(log).count(&.starts_with?("--rewrite")).should eq 3
+      File.read_lines(log).last.should end_with(
+        "--link #{built / "math.c.0.o"} --c-hashes #{built / "math.c.hashes"} --link #{built / "math.o"}")
+    end
+  end
+
+  it "gives a tiered build no C module hashes, which only an optimized build reads" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0", archive: tar_gz([
+        {"build/", '5', ""}, {"build/math.o", '0', "object"}, {"build/math.c.hashes", '0', "hashes"},
+      ]))
+      zane(["add", registry.url("math"), "v1.0"], project)[0].should eq 0
+      Dir.mkdir_p(project / "test" / "t")
+      File.write(project / "test" / "t" / "t.zn", "package test;\n")
+      zane(["test"], project)
+      tiered = File.read_lines(log).select(&.includes?("--tiered"))
+      tiered.should_not be_empty
+      tiered.each do |line|
+        line.should contain "--link #{entry("math", "v1.0") / "build" / Zane::Target::HOST / "math.o"}"
+        line.should_not contain "--c-hashes"
+      end
+    end
+  end
+
+  it "links what the compiler writes beside a dependency compiled from source or a path" do
+    with_registry do |registry, project, log|
+      ENV["FAKE_ZANEC_C"] = "1"
+      registry.publish("math", "v1.0", artifacts: false)
+      commit = registry.publish("shapes", "v2.0")
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
+      local = registry.dir / "shapes"
+      File.write(project / "zane.coda", File.read(project / "zane.coda").sub("]", "    shapes v2.0 #{local.relative_to(project).to_posix}\n]"))
+      File.write(project / "zane-lock.coda", File.read(project / "zane-lock.coda").sub(/\]\n\z/, "    shapes #{registry.url("shapes")} #{commit}\n]\n"))
+      zane(["build"], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+      source = entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST
+      path = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("shapes")).identity_hash / "v2.0"
+      [source, path].each do |dir|
+        File.read_lines(log).last.should contain(
+          "--link #{dir / "package.c.0.o"} --c-hashes #{dir / "package.c.hashes"} --link #{dir / "package.o"}")
+      end
     end
   end
 
