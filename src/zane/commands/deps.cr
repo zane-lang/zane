@@ -60,6 +60,37 @@ module Zane::Commands
       graph
     end
 
+    # Whether every package *graph* links as a release can be linked: a
+    # release is linked from the objects its artifact manifest lists (spec
+    # dependencies.md §3.1), so one that publishes none is refused, before
+    # either file is written, since no build could link it. One that lists
+    # none for the host is warned of, since the project may build for the
+    # targets it lists. The keys of the project's own dependencies warned
+    # of are returned.
+    private def check_releases(graph : Graph) : Array(String)
+      direct = (graph.direct + graph.test_direct).to_h { |e| {e.package.node, e.key} }
+      warned = [] of String
+      graph.packages.each do |package|
+        next unless package.from.release?
+        entry = package.entry || next
+        root = package.layout.root
+        key = direct[package.node]?
+        unless File.file?(root / CacheEntry::ARTIFACTS)
+          remedy = key ? "To compile it here, run `zane add #{package.url} --from-source`" : "It is a dependency of a dependency, linked as its release, so its publisher has to publish prebuilt objects for it"
+          raise UserError.new("#{package.url} #{package.tag} publishes no prebuilt objects: it has no " \
+                              "#{CacheEntry::ARTIFACTS}, so no build could link it. #{remedy}")
+        end
+        begin
+          entry.artifact(root, Target::HOST)
+        rescue UserError
+          @error.puts "zane: warning: #{package.url} #{package.tag} has no prebuilt objects for #{Target::HOST}; " \
+                      "only a build for a target its #{CacheEntry::ARTIFACTS} lists links it"
+          warned << key if key
+        end
+      end
+      warned
+    end
+
     # The dependency *key*, which the project must have.
     private def dependency(key : String) : Dependency
       workspace.manifest.dependency?(key) ||
@@ -147,34 +178,22 @@ module Zane::Commands
       # that cannot be resolved is never recorded.
       graph = resolve(ws.manifest.with_dependency(dep, Resolution.new(url.url, commit)))
       edge = (@test ? graph.test_direct : graph.direct).find! { |e| e.key == key }
-      check_prebuilt(edge.package, key) unless @from_source
+      warned = check_releases(graph).includes?(key)
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) { ProjectFiles.deps(doc, @test)[key] = Coda::Row.new.insert("version", tag).insert("from", dep.from); nil },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc)[key] = Coda::Row.new.insert("url", url.url).insert("commit", commit); nil })
 
-      how = @from_source ? "compiled from source" : "linked from its prebuilt objects"
+      how = if @from_source
+              "compiled from source"
+            elsif warned
+              "linked from its prebuilt objects, which it publishes for other targets than this one"
+            else
+              "linked from its prebuilt objects"
+            end
       @output.puts "Added #{key} #{tag} (#{url}, commit #{commit[0, 12]}), #{how}#{@test ? ", for the tests" : ""}."
       imports = edge.package.layout.public_libs.map { |l| "import #{l.name}" }
       @output.puts "Import its packages#{@test ? " in test/" : ""} with: #{imports.join(", ")}"
       0
-    end
-
-    # A release is linked from the objects its artifact manifest lists
-    # (spec dependencies.md §3.1), so one that publishes none is not
-    # recorded as a release: the build would only fail on it. One that
-    # lists none for the host is recorded, since the project may build for
-    # the targets it does list, with a warning.
-    private def check_prebuilt(package : Graph::Package, key : String) : Nil
-      path = package.layout.root / CacheEntry::ARTIFACTS
-      unless File.file?(path)
-        raise UserError.new("#{package.url} #{package.tag} publishes no prebuilt objects: it has no " \
-                            "#{CacheEntry::ARTIFACTS}. To compile it here, add it with --from-source")
-      end
-      begin
-        package.entry.try(&.artifact(package.layout.root, Target::HOST))
-      rescue error : UserError
-        @error.puts "zane: warning: #{error.message}"
-      end
     end
 
     # `zane add <url> --from-source` for a library the project already
@@ -190,6 +209,14 @@ module Zane::Commands
       unless PackageUrl.parse(locked.url).normalized == url.normalized
         raise UserError.new("the project already depends on `#{key}`, at #{locked.url}; choose another key with --as")
       end
+      if dep.test != @test
+        raise UserError.new("`#{key}` is in `#{dep.test ? "test-deps" : "deps"}`; " \
+                            "#{dep.test ? "add --test to switch it" : "switch it without --test"}")
+      end
+      if Manifest.path?(dep.from)
+        raise UserError.new("`#{key}` compiles from the local project #{dep.from}; " \
+                            "`zane dev off #{key}` links its release first")
+      end
       if (tag = @args[1]?) && tag != dep.version
         raise UserError.new("`#{key}` is pinned to #{dep.version}; change its version with `zane update`")
       end
@@ -198,7 +225,7 @@ module Zane::Commands
         return 0
       end
       updated = dep.copy_with(from: "source")
-      resolve(ws.manifest.with_dependency(updated, locked))
+      check_releases(resolve(ws.manifest.with_dependency(updated, locked)))
       ProjectFiles.change(ws.root, ->(doc : Coda::Doc) { ProjectFiles.deps(doc, dep.test)[key]["from"] = "source"; nil })
       @output.puts "#{key} now compiles from source, at #{dep.version}; `zane dev off #{key}` links its release again."
       0
@@ -288,7 +315,7 @@ module Zane::Commands
         return 0
       end
 
-      resolve(manifest)
+      check_releases(resolve(manifest))
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) {
           updates.each { |_, d, _| ProjectFiles.deps(doc, d.test)[d.key]["version"] = d.version }
@@ -338,7 +365,7 @@ module Zane::Commands
 
       same_package(dep, Path[from].expand(ws.root)) unless off
       updated = dep.copy_with(from: from)
-      resolve(ws.manifest.with_dependency(updated, ws.manifest.resolutions[dep.key]))
+      check_releases(resolve(ws.manifest.with_dependency(updated, ws.manifest.resolutions[dep.key])))
       ProjectFiles.change(ws.root, ->(doc : Coda::Doc) { ProjectFiles.deps(doc, dep.test)[dep.key]["from"] = from; nil })
       if off
         @output.puts "#{dep.key} now links its release, #{dep.version}."

@@ -21,7 +21,8 @@ module Zane::CLI
                              tst, cgt or ll; the last four also take --optimize and
                              --target TRIPLE, as zane build does
       add <url> [tag]        depend on the library at url, at its newest tag or the one named;
-                             with --test, for the test package alone
+                             with --test, for the test package alone; with --from-source,
+                             compiled here, which also switches a library already added
       remove <key>           stop depending on key
       update [key [tag]]     move key, or every dependency, to its newest tag or the one named
       dev <key> <path>       compile key from the local project at path

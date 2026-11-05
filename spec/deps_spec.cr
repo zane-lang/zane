@@ -70,6 +70,7 @@ private class Registry
     end
     FileUtils.rm_rf(repo / "lib")
     FileUtils.rm_rf(repo / "bin")
+    File.delete?(repo / "zane-artifacts.coda")
     dir = program ? repo / "bin" / package_name : repo / "lib" / package_name
     Dir.mkdir_p(dir)
     File.write(dir / "#{name}.zn", "package #{package_name};\n")
@@ -454,11 +455,33 @@ describe Zane::Commands::Add do
     with_registry do |registry, project|
       registry.publish("bare", "v1.0", artifacts: false)
       before = File.read(project / "zane.coda")
-      expect_raises(Zane::UserError, "publishes no prebuilt objects: it has no zane-artifacts.coda. To compile it here, add it with --from-source") do
+      expect_raises(Zane::UserError, "publishes no prebuilt objects: it has no zane-artifacts.coda, so no build could link it. To compile it here, run `zane add #{registry.url("bare")} --from-source`") do
         zane(["add", registry.url("bare")], project)
       end
+      expect_raises(Zane::UserError, "publishes no prebuilt objects") { zane(["add", registry.url("bare"), "--test"], project) }
       File.read(project / "zane.coda").should eq before
       zane(["add", registry.url("bare"), "--from-source"], project)[0].should eq 0
+      expect_raises(Zane::UserError, "publishes no prebuilt objects") { zane(["dev", "off", "bare"], project) }
+      read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"bare" => {"version" => "v1.0", "from" => "source"}})
+    end
+  end
+
+  it "refuses a library one of whose own dependencies publishes no prebuilt objects" do
+    with_registry do |registry, project|
+      registry.publish("bare", "v1.0", artifacts: false)
+      registry.publish("app2", "v1.0", deps: [{"bare", "v1.0"}])
+      expect_raises(Zane::UserError, "It is a dependency of a dependency") { zane(["add", registry.url("app2")], project) }
+      expect_raises(Zane::UserError, "It is a dependency of a dependency") { zane(["add", registry.url("app2"), "--from-source"], project) }
+    end
+  end
+
+  it "refuses to update a release to a tag that publishes no prebuilt objects" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      registry.publish("math", "v1.1", artifacts: false)
+      expect_raises(Zane::UserError, "publishes no prebuilt objects") { zane(["update", "math"], project) }
+      read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"math" => {"version" => "v1.0", "from" => "release"}})
     end
   end
 
@@ -468,6 +491,9 @@ describe Zane::Commands::Add do
       status, _, error = zane(["add", registry.url("math")], project)
       status.should eq 0
       error.should contain "warning: #{registry.url("math")} v1.0 has no prebuilt objects for #{Zane::Target::HOST}"
+      zane(["remove", "math"], project)
+      status, output, _ = zane(["add", registry.url("math")], project)
+      output.should contain "which it publishes for other targets than this one"
       read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"math" => {"version" => "v1.0", "from" => "release"}})
     end
   end
@@ -488,8 +514,23 @@ describe Zane::Commands::Add do
       expect_raises(Zane::UserError, "choose another key with --as") do
         zane(["add", registry.url("other"), "--as", "math", "--from-source"], project)
       end
+      expect_raises(Zane::UserError, "is in `deps`; switch it without --test") do
+        zane(["add", registry.url("math"), "--from-source", "--test"], project)
+      end
       zane(["dev", "off", "math"], project)[0].should eq 0
       read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"math" => {"version" => "v1.0", "from" => "release"}})
+    end
+  end
+
+  it "keeps a path dependency rather than switching it to source" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      local = registry.dir / "math"
+      zane(["dev", "math", local.to_s], project)[0].should eq 0
+      expect_raises(Zane::UserError, "`zane dev off math` links its release first") do
+        zane(["add", registry.url("math"), "--from-source"], project)
+      end
     end
   end
 
