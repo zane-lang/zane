@@ -207,7 +207,12 @@ module Zane::Commands
       existing = File.exists?(ignore) ? File.read(ignore) : ""
       unless existing.lines.any? { |l| {"out/", "out", "/out", "/out/"}.includes?(l.strip) }
         separator = existing.empty? || existing.ends_with?('\n') ? "" : "\n"
-        File.write(ignore, "#{existing}#{separator}out/\n")
+        existing = "#{existing}#{separator}out/\n"
+        File.write(ignore, existing)
+      end
+      unless existing.lines.any? { |l| {"compile_commands.json", "/compile_commands.json"}.includes?(l.strip) }
+        separator = existing.empty? || existing.ends_with?('\n') ? "" : "\n"
+        File.write(ignore, "#{existing}#{separator}compile_commands.json\n")
       end
     end
 

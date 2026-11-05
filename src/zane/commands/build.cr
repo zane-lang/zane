@@ -1,4 +1,5 @@
 require "file_utils"
+require "json"
 require "option_parser"
 require "../compiler"
 require "../warnings"
@@ -235,11 +236,63 @@ module Zane::Commands
       builds << library_build unless layout.libs.empty?
       layout.programs.each { |p| builds << program_build(p) }
       layout.tests.each { |t| builds << test_build(t) }
+      compile_commands(builds) if c_code?
       builds.each do |flags|
         status = compiler.run(["--check"] + flags, @output, diagnostics).tap { diagnostics.flush }
         return status unless status == 0
       end
       0
+    end
+  end
+
+  class Check
+    # Whether any of the project's packages holds C: a `.c` file or a
+    # `c.coda` in its directory.
+    private def c_code? : Bool
+      dirs = layout.libs.map(&.dir) + layout.programs.map(&.dir) + layout.tests.map(&.dir)
+      dirs.any? { |d| Dir.children(d).any? { |f| f.ends_with?(".c") || f == "c.coda" } }
+    end
+
+    # The project's `compile_commands.json` (§2.2): the compilation database
+    # of its packages' C sources, which an editor's C language server reads,
+    # merged from each build's, each source once. What a build cannot list,
+    # as a `c.coda` it refuses, is the check's to report, so it is not
+    # reported here too. `zane_ffi.h` is copied to `include/` of zane's
+    # home, a place that does not move, for an editor set up by hand.
+    private def compile_commands(builds : Array(Array(String))) : Nil
+      entries = {} of String => JSON::Any
+      builds.each do |flags|
+        file = File.tempname("zane-commands", ".json")
+        begin
+          next unless compiler.run(["--compile-commands", file] + flags, IO::Memory.new, IO::Memory.new) == 0
+          JSON.parse(File.read(file)).as_a.each { |e| entries[e["file"].as_s] ||= e }
+        rescue JSON::ParseException | File::Error
+        ensure
+          File.delete?(file)
+        end
+      end
+      return if entries.empty?
+      File.write(workspace.root / "compile_commands.json", "#{entries.values.to_pretty_json}\n")
+      stable_header(entries.values.first)
+    rescue error : File::Error
+      @error.puts "zane: warning: compile_commands.json could not be written: #{error.message}"
+    end
+
+    # `zane_ffi.h` from the directory an entry's `-isystem` names, copied to
+    # `include/` of zane's home when it differs.
+    private def stable_header(entry : JSON::Any) : Nil
+      arguments = entry["arguments"].as_a.map(&.as_s)
+      arguments.each_cons_pair do |flag, dir|
+        next unless flag == "-isystem"
+        header = Path[dir] / "zane_ffi.h"
+        next unless File.file?(header)
+        target = Home.dir / "include" / "zane_ffi.h"
+        text = File.read(header)
+        return if File.file?(target) && File.read(target) == text
+        Dir.mkdir_p(target.parent)
+        File.write(target, text)
+        return
+      end
     end
   end
 

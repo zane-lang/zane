@@ -109,7 +109,17 @@ a build with no root, then each program package and each test package as the
 root of its own build (§5), and stops at the first that fails. A library
 package's C files are compiled in each of those builds, so `zane` shows a C
 warning the compiler gives once, at the first build that gives it; `build` and
-`run` do the same across their programs. It works from
+`run` do the same across their programs.
+
+When a package holds C (a `.c` file or a `c.coda`), `check` first writes
+`compile_commands.json` at the project's root, the compilation database an
+editor's C language server (clangd) reads, so a binding's C sees
+`<zane_ffi.h>` and the `include` and `define` rows of its `c.coda`. Each
+build's database comes from `zanec --compile-commands`, and `zane` merges
+them, each source once; what a build cannot list is left to the check to
+report. `zane init` puts the file in `.gitignore`. `check` also copies
+`zane_ffi.h` to `include/` of zane's home (`~/.zane/include`), a path that
+does not move, for an editor set up by hand. It works from
 any directory inside the project, as every command below does: `zane` looks
 for `zane.coda` there and in each directory above.
 
