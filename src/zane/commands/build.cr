@@ -1,6 +1,8 @@
 require "file_utils"
+require "json"
 require "option_parser"
 require "../compiler"
+require "../warnings"
 require "../errors"
 require "../graph"
 require "../progress"
@@ -29,6 +31,7 @@ module Zane::Commands
     @layout : Layout? = nil
     @graph : Graph? = nil
     @test_graph : Graph? = nil
+    @diagnostics : Warnings? = nil
 
     # *dir* is where the command runs from, and *toolchains* where compilers
     # are installed; tests change both.
@@ -86,6 +89,12 @@ module Zane::Commands
 
     private def compiler : Compiler
       Compiler.locate(workspace.zane_version, @toolchains)
+    end
+
+    # Where a compiler run writes its diagnostics: the error stream, with a
+    # warning an earlier run of this command showed left out.
+    private def diagnostics : Warnings
+      @diagnostics ||= Warnings.new(@error)
     end
 
     # The flags for the project's library packages, after the build's own
@@ -164,9 +173,9 @@ module Zane::Commands
       links = g.link_flags(target || Target::HOST, compiler, hashes: true)
       summary = "Compiled #{what}, optimized"
       summary += ", with its dependencies' code compiled from source to inline it" unless g.linked.empty?
-      Progress.current.run("Compiling #{what}, optimized", summary, @output, @error) do |output, error|
+      Progress.current.run("Compiling #{what}, optimized", summary, @output, diagnostics) do |output, error|
         compiler.run(args + flags + links, output, error)
-      end
+      end.tap { diagnostics.flush }
     end
 
     # Builds *flags* for the host into *path* and runs it with *args*, as
@@ -183,9 +192,9 @@ module Zane::Commands
       tier1 = compiler.start(["--tier-up", library.to_s] + flags)
       begin
         summary = "Compiled #{what}; its optimized build goes on in the background"
-        status = Progress.current.run("Compiling #{what}", summary, @output, @error) do |output, error|
+        status = Progress.current.run("Compiling #{what}", summary, @output, diagnostics) do |output, error|
           compiler.run(["--build", path.to_s, "--tiered"] + flags + links, output, error)
-        end
+        end.tap { diagnostics.flush }
         return status unless status == 0
         Compiler.launch(path.to_s, args, env: {"ZANE_TIER_UP" => library.to_s},
           input: Process::Redirect::Inherit, output: @output, error: @error)
@@ -239,13 +248,70 @@ module Zane::Commands
       builds << {"the library packages", library_build} unless layout.libs.empty?
       layout.programs.each { |p| builds << {"bin/#{p.name}/", program_build(p)} }
       layout.tests.each { |t| builds << {"test/#{t.label}/", test_build(t)} }
+      compile_commands(builds.map(&.[1])) if c_code?
       builds.each do |what, flags|
-        status = Progress.current.run("Checking #{what}", "Checked #{what}", @output, @error) do |output, error|
+        status = Progress.current.run("Checking #{what}", "Checked #{what}", @output, diagnostics) do |output, error|
           compiler.run(["--check"] + flags, output, error)
-        end
+        end.tap { diagnostics.flush }
         return status unless status == 0
       end
       0
+    end
+  end
+
+  class Check
+    # Whether any of the project's packages holds C: a `.c` file or a
+    # `c.coda` in its directory.
+    private def c_code? : Bool
+      dirs = layout.libs.map(&.dir) + layout.programs.map(&.dir) + layout.tests.map(&.dir)
+      dirs.any? { |d| Dir.children(d).any? { |f| f.ends_with?(".c") || f == "c.coda" } }
+    end
+
+    # The project's `compile_commands.json` (§2.2): the compilation database
+    # of its packages' C sources, which an editor's C language server reads,
+    # merged from each build's, each source once. What a build cannot list,
+    # as a `c.coda` it refuses, is the check's to report, so it is not
+    # reported here too. `zane_ffi.h` is copied to `include/` of zane's
+    # home, a place that does not move, for an editor set up by hand.
+    private def compile_commands(builds : Array(Array(String))) : Nil
+      entries = {} of String => JSON::Any
+      builds.each do |flags|
+        file = File.tempname("zane-commands", ".json")
+        begin
+          next unless compiler.run(["--compile-commands", file] + flags, IO::Memory.new, IO::Memory.new) == 0
+          JSON.parse(File.read(file)).as_a.each { |e| entries[e["file"].as_s] ||= e }
+        rescue JSON::ParseException | File::Error
+        ensure
+          File.delete?(file)
+        end
+      end
+      return if entries.empty?
+      # Written whole beside it and renamed over it, so an editor never
+      # reads half a database.
+      database = workspace.root / "compile_commands.json"
+      partial = Path["#{database}.partial"]
+      File.write(partial, "#{entries.values.to_pretty_json}\n")
+      File.rename(partial, database)
+      stable_header(entries.values.first)
+    rescue error : File::Error
+      @error.puts "zane: warning: compile_commands.json could not be written: #{error.message}"
+    end
+
+    # `zane_ffi.h` from the directory an entry's `-isystem` names, copied to
+    # `include/` of zane's home when it differs.
+    private def stable_header(entry : JSON::Any) : Nil
+      arguments = entry["arguments"].as_a.map(&.as_s)
+      arguments.each_cons_pair do |flag, dir|
+        next unless flag == "-isystem"
+        header = Path[dir] / "zane_ffi.h"
+        next unless File.file?(header)
+        target = Home.dir / "include" / "zane_ffi.h"
+        text = File.read(header)
+        return if File.file?(target) && File.read(target) == text
+        Dir.mkdir_p(target.parent)
+        File.write(target, text)
+        return
+      end
     end
   end
 

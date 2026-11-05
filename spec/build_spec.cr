@@ -1,3 +1,4 @@
+require "json"
 require "./spec_helper"
 
 # The fake compiler, built once for every example.
@@ -237,6 +238,32 @@ describe Zane::Commands do
     with_project do |root, log|
       zane(Zane::Commands::Check, [] of String, root).should eq({0, "", ""})
       logged(log).should eq ["--check --root --package demo=#{root / "bin" / "demo"} --import demo:demo=demo"]
+    end
+  end
+
+  it "writes the C sources' compilation database at the root, each source once, and zane_ffi.h to zane's home" do
+    files = {"lib/fs/fs.zn" => "package fs;\n", "lib/fs/fs.c" => "int f(void);\n", "bin/demo/main.zn" => "package demo;\n"}
+    with_project(files) do |root, log|
+      ffi = root / "ffi"
+      Dir.mkdir_p(ffi)
+      File.write(ffi / "zane_ffi.h", "the header\n")
+      ENV["FAKE_FFI_DIR"] = ffi.to_s
+      begin
+        zane(Zane::Commands::Check, [] of String, root).should eq({0, "", ""})
+      ensure
+        ENV.delete("FAKE_FFI_DIR")
+      end
+      database = JSON.parse(File.read(root / "compile_commands.json")).as_a
+      database.map(&.["file"].as_s).should eq [(root / "lib" / "fs" / "fs.c").to_s]
+      File.read(Zane::Home.dir / "include" / "zane_ffi.h").should eq "the header\n"
+      logged(log).map(&.split.first).should eq ["--compile-commands", "--compile-commands", "--check", "--check"]
+    end
+  end
+
+  it "writes no compilation database for a project without C" do
+    with_project do |root, log|
+      zane(Zane::Commands::Check, [] of String, root).should eq({0, "", ""})
+      File.exists?(root / "compile_commands.json").should be_false
     end
   end
 

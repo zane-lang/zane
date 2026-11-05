@@ -1,3 +1,5 @@
+require "json"
+
 # Stands in for `zanec` in the specs. `--rewrite STAMP INPUT OUTPUT` writes
 # the stamp's line followed by the input, and `--remap FROM TO INPUT OUTPUT`
 # a line naming both stamps followed by the input. As a compiler (any run
@@ -7,7 +9,9 @@
 # `FAKE_ZANEC_C` set, writes beside it what a package's C adds: `STEM.c.0.o`
 # and `STEM.c.hashes`. For
 # `--tier-up OUT` it writes OUT once it has logged, unless `FAKE_TIER_HANG`
-# is set, when it never finishes.
+# is set, when it never finishes. For `--compile-commands OUT` it writes a
+# database of each `.c` file directly in a `--package` directory, whose
+# arguments name `FAKE_FFI_DIR` with `-isystem`.
 # Run as that program, it prints its arguments and exits with
 # `FAKE_PROGRAM_STATUS`. With `FAKE_PROGRAM_TIER` set it first waits for the
 # file `ZANE_TIER_UP` names, and writes that name to `FAKE_PROGRAM_TIER`.
@@ -42,6 +46,16 @@ elsif ARGV.includes?("--package")
       File.write("#{stem}.c.0.o", "assembled")
       File.write("#{stem}.c.hashes", "hashes")
     end
+  end
+  if i = ARGV.index("--compile-commands")
+    dirs = ARGV.each_cons_pair.select { |flag, _| flag == "--package" }.map { |_, value| value.split('=').last }
+    entries = dirs.flat_map do |dir|
+      Dir.children(dir).select(&.ends_with?(".c")).sort.map do |c|
+        file = File.join(dir, c)
+        {"directory" => dir, "file" => file, "arguments" => ["clang", "-isystem", ENV.fetch("FAKE_FFI_DIR", ""), "-c", file]}
+      end
+    end
+    File.write(ARGV[i + 1], entries.to_json)
   end
   if i = ARGV.index("--tier-up")
     sleep 1.hour if ENV["FAKE_TIER_HANG"]?

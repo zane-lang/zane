@@ -136,7 +136,20 @@ directory untouched. It then writes:
 Runs the compiler up to and including semantic checking and stops. This is the
 fast loop while editing. It checks the project's library packages together, in
 a build with no root, then each program package and each test package as the
-root of its own build (§5), and stops at the first that fails. It works from
+root of its own build (§5), and stops at the first that fails. A library
+package's C files are compiled in each of those builds, so `zane` shows a C
+warning the compiler gives once, at the first build that gives it; `build` and
+`run` do the same across their programs.
+
+When a package holds C (a `.c` file or a `c.coda`), `check` first writes
+`compile_commands.json` at the project's root, the compilation database an
+editor's C language server (clangd) reads, so a binding's C sees
+`<zane_ffi.h>` and the `include` and `define` rows of its `c.coda`. Each
+build's database comes from `zanec --compile-commands`, and `zane` merges
+them, each source once; what a build cannot list is left to the check to
+report. `zane init` puts the file in `.gitignore`. `check` also copies
+`zane_ffi.h` to `include/` of zane's home (`~/.zane/include`), a path that
+does not move, for an editor set up by hand. It works from
 any directory inside the project, as every command below does: `zane` looks
 for `zane.coda` there and in each directory above.
 
@@ -225,10 +238,10 @@ These and `zane toolchain update` (§4) are the only commands that write
 
 | Command | Does |
 |---|---|
-| `zane add <url> [tag] [--as key] [--from-source] [--test]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Resolves the graph with the library in it before writing either file, so a library that cannot be resolved is never recorded. Refuses a project with no public library package. Prints the `import` lines for its public library packages. With `--test`, writes the row into `test-deps` instead of `deps`. |
+| `zane add <url> [tag] [--as key] [--from-source] [--test]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Resolves the graph with the library in it before writing either file, so a library that cannot be resolved is never recorded. Refuses a project with no public library package. Refuses, too, a graph in which a package linked as a release has no `zane-artifacts.coda`, since no build could link it: the library itself, unless `--from-source` is given, or one of its own dependencies, which are always linked as releases. A release whose artifact manifest lists no archive for the host is recorded with a warning, since the project may build for the targets it lists. Prints the `import` lines for its public library packages. With `--test`, writes the row into `test-deps` instead of `deps`. With `--from-source`, for a library the project already depends on at that URL, in the block `--test` names, sets its `from` to `source` at the version it pins; `zane dev off` sets it back to `release`. A dependency compiled from a local project is left as it is. |
 | `zane remove <key>` | Removes the key, from `deps` or `test-deps`, from both files, and warns about each line of the project's packages that still imports one of its packages. |
-| `zane update [key [tag]] [--accept-tag-move]` | Moves one key, or every key, to the tag named, or else the newest, and pins its commit. A tag that now points to another commit than the lock file pins has moved, and is refused with a security error without the flag. |
-| `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. |
+| `zane update [key [tag]] [--accept-tag-move]` | Moves one key, or every key, to the tag named, or else the newest, and pins its commit. A tag that now points to another commit than the lock file pins has moved, and is refused with a security error without the flag. Refuses, as `add` does, a release it would move to a tag that publishes no prebuilt objects. |
+| `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. `dev off` refuses, as `add` does, a release that publishes no prebuilt objects. |
 | `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
 | `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. |
 | `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, URL and where its code comes from. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |

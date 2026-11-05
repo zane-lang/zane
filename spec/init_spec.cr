@@ -149,7 +149,7 @@ describe Zane::Commands::Init do
 
       File.read(root / "bin" / "myApp" / "main.zn").should start_with "package myApp;\n"
       Dir.exists?(root / "test").should be_false
-      File.read(root / ".gitignore").should eq "out/\n"
+      File.read(root / ".gitignore").should eq "out/\ncompile_commands.json\n"
       File.exists?(root / ".git").should be_false
     end
   end
@@ -226,13 +226,13 @@ describe Zane::Commands::Init do
     end
   end
 
-  it "accepts the files of a new repository, and adds out/ to its .gitignore" do
+  it "accepts the files of a new repository, and adds out/ and compile_commands.json to its .gitignore" do
     with_tmp do |tmp|
       File.write(tmp / "README.md", "# x\n")
       File.write(tmp / "LICENSE", "")
       File.write(tmp / ".gitignore", "*.o")
       init([tmp.to_s, "--name", "x", "--no-git"])
-      File.read(tmp / ".gitignore").should eq "*.o\nout/\n"
+      File.read(tmp / ".gitignore").should eq "*.o\nout/\ncompile_commands.json\n"
     end
   end
 
