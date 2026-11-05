@@ -86,12 +86,17 @@ module Zane
           triples << triple
           found = {url, sha} if triple == target
         end
-        found || raise UserError.new(
+        found || raise NoTarget.new(
           "#{@url} #{@tag} has no prebuilt objects for #{target}; its #{ARTIFACTS} lists " \
           "#{triples.empty? ? "none" : triples.join(", ")}. To compile it here, set its `from` to `source`")
       end
     rescue error : Coda::Error
       raise UserError.new("#{path}: #{error.message}")
+    end
+
+    # A valid artifact manifest that lists no objects for the target asked
+    # for, as distinct from one that is malformed.
+    class NoTarget < UserError
     end
 
     # The rewritten objects for *target*, which a program links. They are

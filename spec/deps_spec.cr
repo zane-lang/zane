@@ -455,14 +455,26 @@ describe Zane::Commands::Add do
     with_registry do |registry, project|
       registry.publish("bare", "v1.0", artifacts: false)
       before = File.read(project / "zane.coda")
-      expect_raises(Zane::UserError, "publishes no prebuilt objects: it has no zane-artifacts.coda, so no build could link it. To compile it here, run `zane add #{registry.url("bare")} --from-source`") do
+      expect_raises(Zane::UserError, "publishes no prebuilt objects: it has no zane-artifacts.coda, so no build could link it. To compile it here, run `zane add #{registry.url("bare")} --from-source --as bare`") do
         zane(["add", registry.url("bare")], project)
       end
-      expect_raises(Zane::UserError, "publishes no prebuilt objects") { zane(["add", registry.url("bare"), "--test"], project) }
+      expect_raises(Zane::UserError, "--from-source --as tools --test`") { zane(["add", registry.url("bare"), "--test", "--as", "tools"], project) }
       File.read(project / "zane.coda").should eq before
       zane(["add", registry.url("bare"), "--from-source"], project)[0].should eq 0
       expect_raises(Zane::UserError, "publishes no prebuilt objects") { zane(["dev", "off", "bare"], project) }
       read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"bare" => {"version" => "v1.0", "from" => "source"}})
+    end
+  end
+
+  it "refuses a release whose zane-artifacts.coda is malformed, rather than warning of it" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      repo = registry.dir / "math"
+      File.write(repo / "zane-artifacts.coda", "artifacts [\n    target url\n")
+      git(repo, "commit", "-q", "-am", "broken")
+      git(repo, "tag", "v1.1")
+      expect_raises(Zane::UserError, "zane-artifacts.coda") { zane(["add", registry.url("math"), "v1.1"], project) }
+      File.read(project / "zane.coda").should_not contain "math"
     end
   end
 
@@ -976,6 +988,20 @@ describe Zane::Graph do
       line = File.read_lines(log).last
       line.should contain "--import #{registry.id("shapes", "v1.0")}:math=#{registry.id("math", "v1.0")}"
       line.should end_with "--import app:shapes=#{registry.id("shapes", "v1.0")} --import app:math=#{other}"
+    end
+  end
+
+  it "checks only the releases a build links, not a version remapped onto another" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0.0")
+      registry.publish("math", "v1.2.0")
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0.0"}])
+      registry.publish("plot", "v1.0")
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["add", registry.url("math"), "v1.2.0"], project)[0].should eq 0
+      zane(["remap", registry.url("math")], project)[0].should eq 0
+      File.delete(entry("math", "v1.0.0") / "src" / "zane-artifacts.coda")
+      zane(["add", registry.url("plot")], project)[0].should eq 0
     end
   end
 

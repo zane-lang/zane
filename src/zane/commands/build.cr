@@ -272,7 +272,12 @@ module Zane::Commands
         end
       end
       return if entries.empty?
-      File.write(workspace.root / "compile_commands.json", "#{entries.values.to_pretty_json}\n")
+      # Written whole beside it and renamed over it, so an editor never
+      # reads half a database.
+      database = workspace.root / "compile_commands.json"
+      partial = Path["#{database}.partial"]
+      File.write(partial, "#{entries.values.to_pretty_json}\n")
+      File.rename(partial, database)
       stable_header(entries.values.first)
     rescue error : File::Error
       @error.puts "zane: warning: compile_commands.json could not be written: #{error.message}"

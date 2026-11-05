@@ -68,21 +68,26 @@ module Zane::Commands
     # targets it lists. The keys of the project's own dependencies warned
     # of are returned.
     private def check_releases(graph : Graph) : Array(String)
-      direct = (graph.direct + graph.test_direct).to_h { |e| {e.package.node, e.key} }
+      direct = (graph.direct + graph.test_direct).to_h { |e| {graph.resolved(e.package).node, e.key} }
+      tests = graph.test_direct.map(&.key)
       warned = [] of String
-      graph.packages.each do |package|
+      graph.linked.each do |package|
         next unless package.from.release?
         entry = package.entry || next
         root = package.layout.root
         key = direct[package.node]?
         unless File.file?(root / CacheEntry::ARTIFACTS)
-          remedy = key ? "To compile it here, run `zane add #{package.url} --from-source`" : "It is a dependency of a dependency, linked as its release, so its publisher has to publish prebuilt objects for it"
+          remedy = if key
+                     "To compile it here, run `zane add #{package.url} --from-source --as #{key}#{tests.includes?(key) ? " --test" : ""}`"
+                   else
+                     "It is a dependency of a dependency, linked as its release, so its publisher has to publish prebuilt objects for it"
+                   end
           raise UserError.new("#{package.url} #{package.tag} publishes no prebuilt objects: it has no " \
                               "#{CacheEntry::ARTIFACTS}, so no build could link it. #{remedy}")
         end
         begin
           entry.artifact(root, Target::HOST)
-        rescue UserError
+        rescue CacheEntry::NoTarget
           @error.puts "zane: warning: #{package.url} #{package.tag} has no prebuilt objects for #{Target::HOST}; " \
                       "only a build for a target its #{CacheEntry::ARTIFACTS} lists links it"
           warned << key if key
