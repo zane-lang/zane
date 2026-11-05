@@ -106,7 +106,10 @@ directory untouched. It then writes:
 Runs the compiler up to and including semantic checking and stops. This is the
 fast loop while editing. It checks the project's library packages together, in
 a build with no root, then each program package and each test package as the
-root of its own build (§5), and stops at the first that fails. It works from
+root of its own build (§5), and stops at the first that fails. A library
+package's C files are compiled in each of those builds, so `zane` shows a C
+warning the compiler gives once, at the first build that gives it; `build` and
+`run` do the same across their programs. It works from
 any directory inside the project, as every command below does: `zane` looks
 for `zane.coda` there and in each directory above.
 

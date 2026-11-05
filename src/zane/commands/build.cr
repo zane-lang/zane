@@ -1,6 +1,7 @@
 require "file_utils"
 require "option_parser"
 require "../compiler"
+require "../warnings"
 require "../errors"
 require "../graph"
 require "../home"
@@ -28,6 +29,7 @@ module Zane::Commands
     @layout : Layout? = nil
     @graph : Graph? = nil
     @test_graph : Graph? = nil
+    @diagnostics : Warnings? = nil
 
     # *dir* is where the command runs from, and *toolchains* where compilers
     # are installed; tests change both.
@@ -85,6 +87,12 @@ module Zane::Commands
 
     private def compiler : Compiler
       Compiler.locate(workspace.zane_version, @toolchains)
+    end
+
+    # Where a compiler run writes its diagnostics: the error stream, with a
+    # warning an earlier run of this command showed left out.
+    private def diagnostics : Warnings
+      @diagnostics ||= Warnings.new(@error)
     end
 
     # The flags for the project's library packages, after the build's own
@@ -157,7 +165,7 @@ module Zane::Commands
       args.push("--target", target) if target
       args << "--optimize"
       links = g.link_flags(target || Target::HOST, compiler, hashes: true)
-      compiler.run(args + flags + links, @output, @error)
+      compiler.run(args + flags + links, @output, diagnostics).tap { diagnostics.flush }
     end
 
     # Builds *flags* for the host into *path* and runs it with *args*, as
@@ -173,7 +181,7 @@ module Zane::Commands
       library = tier_library(path)
       tier1 = compiler.start(["--tier-up", library.to_s] + flags)
       begin
-        status = compiler.run(["--build", path.to_s, "--tiered"] + flags + links, @output, @error)
+        status = compiler.run(["--build", path.to_s, "--tiered"] + flags + links, @output, diagnostics).tap { diagnostics.flush }
         return status unless status == 0
         Compiler.launch(path.to_s, args, env: {"ZANE_TIER_UP" => library.to_s},
           input: Process::Redirect::Inherit, output: @output, error: @error)
@@ -228,7 +236,7 @@ module Zane::Commands
       layout.programs.each { |p| builds << program_build(p) }
       layout.tests.each { |t| builds << test_build(t) }
       builds.each do |flags|
-        status = compiler.run(["--check"] + flags, @output, @error)
+        status = compiler.run(["--check"] + flags, @output, diagnostics).tap { diagnostics.flush }
         return status unless status == 0
       end
       0
