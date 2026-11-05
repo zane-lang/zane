@@ -137,7 +137,7 @@ describe Zane::Toolchain do
       with_terminal do |terminal|
         output = IO::Memory.new
         Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 0
-        done = Regex.escape(Zane::InstallProgress::DONE)
+        done = Regex.escape(Zane::Progress::DONE)
         steps = terminal.to_s.gsub(/\e\[[0-9;]*[mK]/, "").lines.map(&.split('\r').last)
         [/\A#{done} Found compiler v1\.0 for #{Zane::Toolchain.host} \(\d+\.\ds\)$/,
          /\A#{done} Compiler v1\.0 is commit #{"a" * 12} /,
@@ -163,7 +163,7 @@ describe Zane::Toolchain do
       with_terminal do |terminal|
         output = IO::Memory.new
         Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 1
-        terminal.to_s.gsub(/\e\[[0-9;]*m/, "").should contain "#{Zane::InstallProgress::FAILED} Downloading compiler v1.0\n\r\e[Kzane: 404"
+        terminal.to_s.gsub(/\e\[[0-9;]*m/, "").should contain "#{Zane::Progress::FAILED} Downloading compiler v1.0\n\r\e[Kzane: 404"
         output.to_s.should eq ""
         Dir.children(Zane::Home.toolchains).should be_empty
       end

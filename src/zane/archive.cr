@@ -2,6 +2,7 @@ require "compress/gzip"
 require "file_utils"
 require "./errors"
 require "./sha256"
+require "./progress"
 
 module Zane
   # A library's release archive: downloading it, checking it against the hash
@@ -27,20 +28,29 @@ module Zane
     end
 
     # Downloads *url* to *path* and checks it is the archive whose SHA-256 is
-    # *sha256*. Nothing is left at *path* unless it is.
-    def self.fetch(url : String, sha256 : String, path : Path) : Nil
+    # *sha256*. Nothing is left at *path* unless it is. The progress display
+    # shows both as steps, naming the archive *what*.
+    def self.fetch(url : String, sha256 : String, path : Path, what : String = url) : Nil
       Dir.mkdir_p(path.parent)
       partial = path.parent / ".#{path.basename}.#{Random::Secure.hex(4)}"
+      progress = Progress.current
+      # The counters are read by the thread that draws the progress.
+      progress.step("Downloading #{what}") { File.info?(partial).try(&.size) || 0_i64 }
       download.call(url, partial)
-      verify(partial, sha256, url)
+      progress.done("Downloaded #{what}")
+      hashed = Atomic(Int64).new(0)
+      progress.step("Verifying SHA-256", File.size(partial)) { hashed.get }
+      verify(partial, sha256, url, ->(n : Int32) { hashed.add(n.to_i64); nil })
+      progress.done("Archive matches its SHA-256 #{sha256[0, 12]}", amount: false)
       File.rename(partial, path)
     ensure
       File.delete?(partial) if partial
     end
 
-    # Refuses the file at *path* unless its SHA-256 is *sha256*.
-    def self.verify(path : Path, sha256 : String, url : String) : Nil
-      actual = SHA256.file(path)
+    # Refuses the file at *path* unless its SHA-256 is *sha256*. *read*, when
+    # given, is told the size of each piece hashed.
+    def self.verify(path : Path, sha256 : String, url : String, read : (Int32 -> Nil)? = nil) : Nil
+      actual = SHA256.file(path, read)
       return if actual == sha256
       raise UserError.new("security error: #{url} has SHA-256 #{actual}, " \
                           "but the library's zane-artifacts.coda says #{sha256}")
@@ -64,7 +74,13 @@ module Zane
       partial_created = true
       files = File.open(path) do |file|
         source = read ? Counting.new(file, read) : file
-        Compress::Gzip::Reader.open(source) { |gzip| Tar.new(gzip, path, root, strip_root, executable_modes).extract(partial) }
+        Compress::Gzip::Reader.open(source) do |gzip|
+          count = Tar.new(gzip, path, root, strip_root, executable_modes).extract(partial)
+          # The rest is the tar's padding and gzip's trailer, whose checksum
+          # reading to the end verifies.
+          gzip.skip_to_end
+          count
+        end
       end
       raise UserError.new("#{path} holds no files under #{root}/") if files == 0
       File.rename(partial, dir)

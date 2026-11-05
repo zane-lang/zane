@@ -38,4 +38,15 @@ describe Zane::SHA256 do
       f.delete
     end
   end
+
+  it "tells a caller how much of a file it has hashed, up to the whole file" do
+    data = Bytes.new(200_000) { |i| (i * 13).to_u8! }
+    File.tempfile("sha256") { |f| f.write(data) }.tap do |f|
+      pieces = [] of Int32
+      Zane::SHA256.file(f.path, ->(n : Int32) { pieces << n; nil }).should eq Zane::SHA256.hexdigest(data)
+      pieces.sum.should eq data.size
+      pieces.size.should be > 1
+      f.delete
+    end
+  end
 end
