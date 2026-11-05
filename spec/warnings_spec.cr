@@ -23,6 +23,14 @@ describe Zane::Warnings do
     io.to_s.should eq(error + error)
   end
 
+  it "passes on a block that ends in neither, and still drops a warning shown after it" do
+    io = IO::Memory.new
+    w = Zane::Warnings.new(io)
+    w << warning << "File \"b.c\", line 2:\nNote: aside\n" << warning
+    w.flush
+    io.to_s.should eq("#{warning}File \"b.c\", line 2:\nNote: aside\n")
+  end
+
   it "passes a partial line and an unfinished block on at a flush" do
     io = IO::Memory.new
     w = Zane::Warnings.new(io)

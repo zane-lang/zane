@@ -31,11 +31,15 @@ module Zane
     end
 
     # A diagnostic is a block from its `File "` line to its `Warning:` or
-    # `Error:` line; a warning block shown before is dropped.
+    # `Error:` line; a warning block shown before is dropped. A block that
+    # another `File "` line starts before it ends is passed on as it is.
     private def line : Nil
       text = @line.to_s
       @line.clear
-      if block = @block
+      if (block = @block) && text.starts_with?("File \"")
+        block.each { |l| @io << l }
+        @block = [text]
+      elsif block = @block
         block << text
         if text.starts_with?("Warning: ")
           whole = block.join
