@@ -135,6 +135,9 @@ module Zane::Commands
     def run : Int32
       ws = workspace
       url = PackageUrl.parse(@args[0])
+      if existing = switch_to_source(ws, url)
+        return existing
+      end
       key = choose_key(ws, url)
       tags = Git.tags(url.url)
       tag, commit = pin(tags, url, @args[1]? || newest(tags, url))
@@ -143,15 +146,61 @@ module Zane::Commands
       # The whole graph is resolved before anything is written, so a library
       # that cannot be resolved is never recorded.
       graph = resolve(ws.manifest.with_dependency(dep, Resolution.new(url.url, commit)))
+      edge = (@test ? graph.test_direct : graph.direct).find! { |e| e.key == key }
+      check_prebuilt(edge.package, key) unless @from_source
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) { ProjectFiles.deps(doc, @test)[key] = Coda::Row.new.insert("version", tag).insert("from", dep.from); nil },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc)[key] = Coda::Row.new.insert("url", url.url).insert("commit", commit); nil })
 
       how = @from_source ? "compiled from source" : "linked from its prebuilt objects"
       @output.puts "Added #{key} #{tag} (#{url}, commit #{commit[0, 12]}), #{how}#{@test ? ", for the tests" : ""}."
-      edge = (@test ? graph.test_direct : graph.direct).find! { |e| e.key == key }
       imports = edge.package.layout.public_libs.map { |l| "import #{l.name}" }
       @output.puts "Import its packages#{@test ? " in test/" : ""} with: #{imports.join(", ")}"
+      0
+    end
+
+    # A release is linked from the objects its artifact manifest lists
+    # (spec dependencies.md §3.1), so one that publishes none is not
+    # recorded as a release: the build would only fail on it. One that
+    # lists none for the host is recorded, since the project may build for
+    # the targets it does list, with a warning.
+    private def check_prebuilt(package : Graph::Package, key : String) : Nil
+      path = package.layout.root / CacheEntry::ARTIFACTS
+      unless File.file?(path)
+        raise UserError.new("#{package.url} #{package.tag} publishes no prebuilt objects: it has no " \
+                            "#{CacheEntry::ARTIFACTS}. To compile it here, add it with --from-source")
+      end
+      begin
+        package.entry.try(&.artifact(package.layout.root, Target::HOST))
+      rescue error : UserError
+        @error.puts "zane: warning: #{error.message}"
+      end
+    end
+
+    # `zane add <url> --from-source` for a library the project already
+    # depends on, at that URL, compiles it from source from then on, at the
+    # version it pins (spec dependencies.md §12.1); `zane dev off` links its
+    # release again. Nil when the project does not depend on it yet.
+    private def switch_to_source(ws : Workspace, url : PackageUrl) : Int32?
+      return nil unless @from_source
+      key = @key || url.basename
+      return nil unless ws.manifest.dependency?(key)
+      dep = dependency(key)
+      locked = ws.manifest.resolutions[key]
+      unless PackageUrl.parse(locked.url).normalized == url.normalized
+        raise UserError.new("the project already depends on `#{key}`, at #{locked.url}; choose another key with --as")
+      end
+      if (tag = @args[1]?) && tag != dep.version
+        raise UserError.new("`#{key}` is pinned to #{dep.version}; change its version with `zane update`")
+      end
+      if dep.from == "source"
+        @output.puts "#{key} already compiles from source; nothing changed."
+        return 0
+      end
+      updated = dep.copy_with(from: "source")
+      resolve(ws.manifest.with_dependency(updated, locked))
+      ProjectFiles.change(ws.root, ->(doc : Coda::Doc) { ProjectFiles.deps(doc, dep.test)[key]["from"] = "source"; nil })
+      @output.puts "#{key} now compiles from source, at #{dep.version}; `zane dev off #{key}` links its release again."
       0
     end
 

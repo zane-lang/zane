@@ -62,7 +62,7 @@ private class Registry
   # published before), and returns the tag's commit.
   def publish(name : String, tag : String, deps = [] of {String, String}, program = false,
               archive : Bytes? = nil, artifacts = true, package_name = name, pattern = "v*.+.++",
-              zane_version = "v0.1") : String
+              zane_version = "v0.1", target = Zane::Target::HOST) : String
     repo = @dir / name
     unless Dir.exists?(repo)
       Dir.mkdir_p(repo)
@@ -97,7 +97,7 @@ private class Registry
       File.write(repo / "zane-artifacts.coda", <<-CODA)
         artifacts [
             target url sha256
-            #{Zane::Target::HOST} #{download} #{Zane::SHA256.hexdigest(bytes)}
+            #{target} #{download} #{Zane::SHA256.hexdigest(bytes)}
         ]
         CODA
     end
@@ -444,9 +444,52 @@ describe Zane::Commands::Add do
     with_registry do |registry, project|
       registry.publish("tool", "v1.0", program: true)
       expect_raises(Zane::UserError, "has no public library package") { zane(["add", registry.url("tool")], project) }
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      expect_raises(Zane::UserError, "set its `from` to `source`") { zane(["build", "--target", "riscv64-linux-gnu"], project) }
+    end
+  end
+
+  it "refuses to record a release that publishes no prebuilt objects, and writes nothing" do
+    with_registry do |registry, project|
       registry.publish("bare", "v1.0", artifacts: false)
-      zane(["add", registry.url("bare")], project)[0].should eq 0
-      expect_raises(Zane::UserError, "set its `from` to `source`") { zane(["build"], project) }
+      before = File.read(project / "zane.coda")
+      expect_raises(Zane::UserError, "publishes no prebuilt objects: it has no zane-artifacts.coda. To compile it here, add it with --from-source") do
+        zane(["add", registry.url("bare")], project)
+      end
+      File.read(project / "zane.coda").should eq before
+      zane(["add", registry.url("bare"), "--from-source"], project)[0].should eq 0
+    end
+  end
+
+  it "records a release with no objects for the host, warning that it has none" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0", target: "riscv64-linux-gnu")
+      status, _, error = zane(["add", registry.url("math")], project)
+      status.should eq 0
+      error.should contain "warning: #{registry.url("math")} v1.0 has no prebuilt objects for #{Zane::Target::HOST}"
+      read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"math" => {"version" => "v1.0", "from" => "release"}})
+    end
+  end
+
+  it "switches a library the project depends on to compile from source, and `dev off` links its release again" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      registry.publish("other", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      status, output, _ = zane(["add", registry.url("math"), "--from-source"], project)
+      status.should eq 0
+      output.should contain "math now compiles from source, at v1.0"
+      read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"math" => {"version" => "v1.0", "from" => "source"}})
+      zane(["add", registry.url("math"), "--from-source"], project)[1].should contain "already compiles from source"
+      expect_raises(Zane::UserError, "change its version with `zane update`") do
+        zane(["add", registry.url("math"), "v2.0", "--from-source"], project)
+      end
+      expect_raises(Zane::UserError, "choose another key with --as") do
+        zane(["add", registry.url("other"), "--as", "math", "--from-source"], project)
+      end
+      zane(["dev", "off", "math"], project)[0].should eq 0
+      read_coda(project / "zane.coda")["deps"].as(Hash)["rows"].should eq({"math" => {"version" => "v1.0", "from" => "release"}})
     end
   end
 
