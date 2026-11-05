@@ -67,7 +67,13 @@ module Zane
       end
       progress = Progress.current
       progress.step("Fetching #{name} from #{@url}")
-      Git.checkout(@url.url, @tag, commit, src)
+      begin
+        Git.checkout(@url.url, @tag, commit, src)
+      rescue error
+        # Marked here, since a caller may recover and carry on.
+        progress.fail
+        raise error
+      end
       progress.done("Fetched #{name} from #{@url} (commit #{commit[0, 12]})")
       src
     end

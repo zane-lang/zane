@@ -601,6 +601,18 @@ describe "the progress display" do
     end
   end
 
+  it "marks a failed fetch, though the command recovers and carries on" do
+    with_registry do |registry, project, _|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      FileUtils.rm_rf(Zane::Home.packages)
+      FileUtils.mv(registry.dir / "math", registry.dir / "gone")
+      status, lines = zane_on_terminal(["remove", "math"], project)
+      status.should eq 0
+      lines.map(&.sub(/ \([^()]*\)\z/, "")).should eq ["#{Zane::Progress::FAILED} Fetching math v1.0 from #{registry.url("math")}"]
+    end
+  end
+
   it "names up to three versions from the cache, then how many more" do
     one = [{"math", "v1.0"}]
     Zane::Graph.from_cache(one, "t").should eq "1 dependency's objects for t from the cache: math v1.0"
