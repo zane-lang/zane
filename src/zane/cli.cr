@@ -1,5 +1,6 @@
 require "./version"
 require "./errors"
+require "./progress"
 require "./commands/build"
 require "./commands/cache"
 require "./commands/deps"
@@ -43,35 +44,40 @@ module Zane::CLI
   # when *interactive*, which is true when standard input is a terminal.
   def self.run(args : Array(String), stdout : IO = STDOUT, stderr : IO = STDERR,
                stdin : IO = STDIN, interactive : Bool = STDIN.tty?) : Int32
-    case args.first?
-    when nil, "help", "-h", "--help"
-      stdout.puts USAGE
-    when "version", "--version"
-      stdout.puts "zane #{VERSION}"
-    when "init"
-      Commands::Init.new(args[1..], stdin, stdout, interactive).run
-    when "check"     then return Commands::Check.new(args[1..], stdout, stderr).run
-    when "build"     then return Commands::Build.new(args[1..], stdout, stderr).run
-    when "run"       then return Commands::Run.new(args[1..], stdout, stderr).run
-    when "test"      then return Commands::Test.new(args[1..], stdout, stderr).run
-    when "clean"     then return Commands::Clean.new(args[1..], stdout, stderr).run
-    when "inspect"   then return Commands::Inspect.new(args[1..], stdout, stderr).run
-    when "add"       then return Commands::Add.new(args[1..], stdout, stderr).run
-    when "fetch"     then return Commands::Fetch.new(args[1..], stdout, stderr).run
-    when "remove"    then return Commands::Remove.new(args[1..], stdout, stderr).run
-    when "update"    then return Commands::Update.new(args[1..], stdout, stderr).run
-    when "dev"       then return Commands::Dev.new(args[1..], stdout, stderr).run
-    when "remap"     then return Commands::Remap.new(true, args[1..], stdout, stderr).run
-    when "unremap"   then return Commands::Remap.new(false, args[1..], stdout, stderr).run
-    when "tree"      then return Commands::Tree.new(args[1..], stdout, stderr).run
-    when "cache"     then return Commands::Cache.new(args[1..], stdout, stderr).run
-    when "toolchain" then return Commands::Toolchain.new(args[1..], stdout, stderr).run
-    else
-      stderr.puts "zane: unknown command `#{args.first}`"
-      stderr.puts USAGE
-      return 2
+    # One display shows the slow steps of whichever command runs.
+    Progress.run(stderr) do
+      case args.first?
+      when nil, "help", "-h", "--help"
+        stdout.puts USAGE
+        0
+      when "version", "--version"
+        stdout.puts "zane #{VERSION}"
+        0
+      when "init"
+        Commands::Init.new(args[1..], stdin, stdout, interactive).run
+        0
+      when "check"     then Commands::Check.new(args[1..], stdout, stderr).run
+      when "build"     then Commands::Build.new(args[1..], stdout, stderr).run
+      when "run"       then Commands::Run.new(args[1..], stdout, stderr).run
+      when "test"      then Commands::Test.new(args[1..], stdout, stderr).run
+      when "clean"     then Commands::Clean.new(args[1..], stdout, stderr).run
+      when "inspect"   then Commands::Inspect.new(args[1..], stdout, stderr).run
+      when "add"       then Commands::Add.new(args[1..], stdout, stderr).run
+      when "fetch"     then Commands::Fetch.new(args[1..], stdout, stderr).run
+      when "remove"    then Commands::Remove.new(args[1..], stdout, stderr).run
+      when "update"    then Commands::Update.new(args[1..], stdout, stderr).run
+      when "dev"       then Commands::Dev.new(args[1..], stdout, stderr).run
+      when "remap"     then Commands::Remap.new(true, args[1..], stdout, stderr).run
+      when "unremap"   then Commands::Remap.new(false, args[1..], stdout, stderr).run
+      when "tree"      then Commands::Tree.new(args[1..], stdout, stderr).run
+      when "cache"     then Commands::Cache.new(args[1..], stdout, stderr).run
+      when "toolchain" then Commands::Toolchain.new(args[1..], stdout, stderr).run
+      else
+        stderr.puts "zane: unknown command `#{args.first}`"
+        stderr.puts USAGE
+        2
+      end
     end
-    0
   rescue e : UserError
     stderr.puts "zane: #{e.message}"
     1

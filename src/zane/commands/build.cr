@@ -3,6 +3,7 @@ require "option_parser"
 require "../compiler"
 require "../errors"
 require "../graph"
+require "../progress"
 require "../home"
 require "../layout"
 require "../project"
@@ -150,14 +151,22 @@ module Zane::Commands
     end
 
     # Builds *flags* optimized for *target*, the host when nil, into *path*,
-    # linking *g*'s objects, and returns the compiler's exit status.
-    private def build(flags : Array(String), g : Graph, target : String?, path : Path) : Int32
+    # linking *g*'s objects, and returns the compiler's exit status. *what*
+    # names the package built, such as `bin/app/`. An optimized build also
+    # compiles the dependencies' code it reaches from their source, to inline
+    # it (compiler docs/design/separate-compilation.md C12), which its step
+    # says.
+    private def build(what : String, flags : Array(String), g : Graph, target : String?, path : Path) : Int32
       Dir.mkdir_p(path.parent)
       args = ["--build", path.to_s]
       args.push("--target", target) if target
       args << "--optimize"
       links = g.link_flags(target || Target::HOST, compiler, hashes: true)
-      compiler.run(args + flags + links, @output, @error)
+      summary = "Compiled #{what}, optimized"
+      summary += ", with its dependencies' code compiled from source to inline it" unless g.linked.empty?
+      Progress.current.run("Compiling #{what}, optimized", summary, @output, @error) do |output, error|
+        compiler.run(args + flags + links, output, error)
+      end
     end
 
     # Builds *flags* for the host into *path* and runs it with *args*, as
@@ -166,14 +175,17 @@ module Zane::Commands
     # the faster build, tier 0, while tier 1, the program optimized, is built
     # beside it into a library tier 0 loads once it is there. A tier-1 build
     # still going when the program ends is stopped.
-    private def build_and_run(flags : Array(String), g : Graph, path : Path, args : Array(String)) : Int32
+    private def build_and_run(what : String, flags : Array(String), g : Graph, path : Path, args : Array(String)) : Int32
       Dir.mkdir_p(path.parent)
       compiler = self.compiler
       links = g.link_flags(Target::HOST, compiler, hashes: false)
       library = tier_library(path)
       tier1 = compiler.start(["--tier-up", library.to_s] + flags)
       begin
-        status = compiler.run(["--build", path.to_s, "--tiered"] + flags + links, @output, @error)
+        summary = "Compiled #{what}; its optimized build goes on in the background"
+        status = Progress.current.run("Compiling #{what}", summary, @output, @error) do |output, error|
+          compiler.run(["--build", path.to_s, "--tiered"] + flags + links, output, error)
+        end
         return status unless status == 0
         Compiler.launch(path.to_s, args, env: {"ZANE_TIER_UP" => library.to_s},
           input: Process::Redirect::Inherit, output: @output, error: @error)
@@ -223,12 +235,14 @@ module Zane::Commands
     end
 
     def run : Int32
-      builds = [] of Array(String)
-      builds << library_build unless layout.libs.empty?
-      layout.programs.each { |p| builds << program_build(p) }
-      layout.tests.each { |t| builds << test_build(t) }
-      builds.each do |flags|
-        status = compiler.run(["--check"] + flags, @output, @error)
+      builds = [] of {String, Array(String)}
+      builds << {"the library packages", library_build} unless layout.libs.empty?
+      layout.programs.each { |p| builds << {"bin/#{p.name}/", program_build(p)} }
+      layout.tests.each { |t| builds << {"test/#{t.label}/", test_build(t)} }
+      builds.each do |what, flags|
+        status = Progress.current.run("Checking #{what}", "Checked #{what}", @output, @error) do |output, error|
+          compiler.run(["--check"] + flags, output, error)
+        end
         return status unless status == 0
       end
       0
@@ -263,7 +277,7 @@ module Zane::Commands
       end
       chosen.each do |program|
         path = @path || output_in(@target || "host", program.name, @target)
-        status = build(program_build(program), graph, @target, path)
+        status = build("bin/#{program.name}/", program_build(program), graph, @target, path)
         return status unless status == 0
         @output.puts "Built #{shown(path)}"
       end
@@ -302,7 +316,7 @@ module Zane::Commands
         raise UserError.new("the project has #{chosen.size} programs, #{chosen.map(&.name).join(", ")}; name the one to run")
       end
       program = chosen.first
-      build_and_run(program_build(program), graph, output_in("run", program.name, nil), @program_args)
+      build_and_run("bin/#{program.name}/", program_build(program), graph, output_in("run", program.name, nil), @program_args)
     end
   end
 
@@ -353,7 +367,7 @@ module Zane::Commands
     end
 
     private def run_test(test : Layout::Test) : Int32
-      build_and_run(test_build(test), test_graph, output_in("test", test.label.tr("/", "."), nil), @program_args)
+      build_and_run("test/#{test.label}/", test_build(test), test_graph, output_in("test", test.label.tr("/", "."), nil), @program_args)
     end
 
     private def count(n : Int32) : String

@@ -9,6 +9,7 @@ require "../layout"
 require "../manifest"
 require "../cache"
 require "../package_url"
+require "../progress"
 require "../project_files"
 require "../target"
 require "../workspace"
@@ -69,6 +70,16 @@ module Zane::Commands
     private def known_keys : String
       keys = workspace.manifest.all_deps.map(&.key)
       keys.empty? ? "; it has no dependencies" : "; its dependencies are #{keys.join(", ")}"
+    end
+
+    # The tags of the repository at *url*, listed as a step of its own,
+    # since git asks the host for them.
+    private def list_tags(url : PackageUrl) : Hash(String, String)
+      progress = Progress.current
+      progress.step("Listing the tags of #{url}")
+      tags = Git.tags(url.url)
+      progress.done("Found #{tags.size} #{tags.size == 1 ? "tag" : "tags"} at #{url}")
+      tags
     end
 
     # The highest version tag of *tags*: a `v` and dot-separated numbers,
@@ -136,7 +147,7 @@ module Zane::Commands
       ws = workspace
       url = PackageUrl.parse(@args[0])
       key = choose_key(ws, url)
-      tags = Git.tags(url.url)
+      tags = list_tags(url)
       tag, commit = pin(tags, url, @args[1]? || newest(tags, url))
 
       dep = Dependency.new(key, tag, @from_source ? "source" : "release", @test)
@@ -222,7 +233,7 @@ module Zane::Commands
       deps.each do |dep|
         locked = manifest.resolutions[dep.key]
         url = PackageUrl.parse(locked.url)
-        tags = Git.tags(url.url)
+        tags = list_tags(url)
         tag, commit = pin(tags, url, @args[1]? || newest(tags, url))
         if tag == dep.version
           next if same_commit?(commit, locked.commit)

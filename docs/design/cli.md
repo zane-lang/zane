@@ -40,6 +40,36 @@ downloaded with `curl`, which every supported system ships. `zane` reads a relea
 itself, decompressing it with the zlib Crystal links, so that it checks every
 entry before it writes anything (§3.1).
 
+### 1.1 Progress on a terminal
+
+When stderr is a terminal and `TERM` is not `dumb`, every command reports its
+slow steps there as they happen: listing a repository's tags or the
+compiler's releases, finding the compiler `init` pins, fetching a package's
+checkout, downloading, verifying and unpacking an archive,
+rewriting and remapping objects, compiling a dependency or the project's
+packages, and installing a toolchain (§4.1). A finished step stays on screen
+with a check mark, what it found and how long it took; the running step is
+redrawn in place with a spinner and, when it counts bytes or files, a
+progress bar with the amount done and the time left, and the rate for bytes.
+The redrawn line is fitted to the terminal's width. A failed step is marked
+`✗` above the error.
+
+Versions whose objects the cache already holds, prebuilt or compiled from
+source, are named in one line as coming from the cache. Their source code
+still reaches an optimized `build`, which compiles the dependency code it
+calls to inline it (compiler
+[`separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md)
+C12), and that build's step says so.
+
+What `zanec` writes while it checks or compiles the project's packages is
+held and written once the step is marked done or failed, so it never lands
+inside the redrawn line; a program `run` or `test` starts writes straight to
+the terminal. Compiling a dependency, rewriting and remapping show what the
+compiler wrote only when it fails, as part of the error. The lines
+commands print to stdout come between steps. A non-empty `NO_COLOR` turns
+colours off. Redirected stderr and dumb terminals get none of this, and see
+`zanec`'s output as it is written.
+
 ---
 
 ## 2. Project commands

@@ -60,7 +60,9 @@ archive's SHA-256 and its compiler commit before making it available.
 On a terminal, installation reports each step on stderr as it happens: finished
 steps stay listed with how long they took, and the download, checksum and
 extraction show a progress bar with the amount done, the rate and the time
-left. A non-empty `NO_COLOR` turns its colours off; redirected output and
+left. Every other command reports its slow steps the same way, such as
+fetching packages and compiling ([`docs/design/cli.md`](docs/design/cli.md)
+§1.1). A non-empty `NO_COLOR` turns its colours off; redirected output and
 terminals with `TERM=dumb` keep the usual plain output.
 
 Toolchains live side by side in `~/.zane/toolchains/<version>/`, or under
@@ -77,7 +79,7 @@ zane toolchain update
 zane toolchain update v3.0
 ```
 
-It installs that compiler when it is missing, checks that every dependency's
+It installs that compiler when it is missing, showing the same steps, checks that every dependency's
 `zane-version` allows it, and then writes the version into `zane.coda` and its
 commit into `zane-lock.coda`. Nothing is compiled until the next `zane build`,
 `run`, `test` or `fetch`, so a dependency the new compiler cannot build as
