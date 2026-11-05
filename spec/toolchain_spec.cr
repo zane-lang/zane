@@ -137,7 +137,7 @@ describe Zane::Toolchain do
       with_terminal do |terminal|
         output = IO::Memory.new
         Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 0
-        done = Zane::InstallProgress::DONE
+        done = Regex.escape(Zane::InstallProgress::DONE)
         steps = terminal.to_s.gsub(/\e\[[0-9;]*[mK]/, "").lines.map(&.split('\r').last)
         [/\A#{done} Found compiler v1\.0 for #{Zane::Toolchain.host} \(\d+\.\ds\)$/,
          /\A#{done} Compiler v1\.0 is commit #{"a" * 12} /,

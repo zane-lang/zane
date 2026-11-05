@@ -42,10 +42,11 @@ describe Zane::InstallProgress do
         progress.step("Checking the toolchain")
       end
       lines = plain(terminal).split('\n')
-      lines[0].should match /\r#{Zane::InstallProgress::DONE} Found compiler v1\.0 \(\d+\.\ds\)\z/
+      done = Regex.escape(Zane::InstallProgress::DONE)
+      lines[0].should match /\r#{done} Found compiler v1\.0 \(\d+\.\ds\)\z/
       # The step still running when the block returns is done too, under its
       # own label.
-      lines[1].should match /\r#{Zane::InstallProgress::DONE} Checking the toolchain \(\d+\.\ds\)\z/
+      lines[1].should match /\r#{done} Checking the toolchain \(\d+\.\ds\)\z/
       lines[2].should eq "\r"
     end
   end
