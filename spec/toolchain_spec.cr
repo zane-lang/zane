@@ -131,16 +131,25 @@ private def toolchain_update(project : Path, *args, compiler : String? = nil) : 
 end
 
 describe Zane::Toolchain do
-  it "shows installation stages on a terminal and keeps the success message on stdout" do
+  it "lists each installation step on a terminal and keeps the success message on stdout" do
     with_toolchains do |registry|
       registry.publish("v1.0")
       with_terminal do |terminal|
         output = IO::Memory.new
         Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 0
-        ["Looking up", "Resolving", "Downloading checksums", "Downloading compiler",
-         "Verifying", "Extracting", "Checking", "Installing"].each do |stage|
-          terminal.to_s.should contain stage
+        done = Zane::InstallProgress::DONE
+        steps = terminal.to_s.gsub(/\e\[[0-9;]*[mK]/, "").lines.map(&.split('\r').last)
+        [/\A#{done} Found compiler v1\.0 for #{Zane::Toolchain.host} \(\d+\.\ds\)$/,
+         /\A#{done} Compiler v1\.0 is commit #{"a" * 12} /,
+         /\A#{done} Downloaded checksums /,
+         /\A#{done} Downloaded #{registry.asset("v1.0")} \(\d+ B in /,
+         /\A#{done} Archive matches its SHA-256 [0-9a-f]{12} /,
+         /\A#{done} Extracted 4 files /,
+         /\A#{done} Toolchain is v1\.0 at commit #{"a" * 12} /,
+         /\A#{done} Installed compiler v1\.0 /].zip(steps) do |expected, step|
+          step.should match expected
         end
+        steps.size.should eq 9
         terminal.to_s.should end_with "\r\e[K"
         output.to_s.should eq "Zane toolchain v1.0 is installed in #{Zane::Home.toolchains / "v1.0"}.\n"
       end
@@ -154,7 +163,7 @@ describe Zane::Toolchain do
       with_terminal do |terminal|
         output = IO::Memory.new
         Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 1
-        terminal.to_s.should contain "\r\e[Kzane: 404"
+        terminal.to_s.gsub(/\e\[[0-9;]*m/, "").should contain "#{Zane::InstallProgress::FAILED} Downloading compiler v1.0\n\r\e[Kzane: 404"
         output.to_s.should eq ""
         Dir.children(Zane::Home.toolchains).should be_empty
       end

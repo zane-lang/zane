@@ -52,16 +52,19 @@ module Zane
     # *dir* (§3.1). Toolchains specify their own root, strip it and preserve
     # executable bits. The tar format is read here, rather than by `tar`, so that
     # every entry is checked before anything is written. Nothing is left at
-    # *dir* unless it succeeds.
+    # *dir* unless it succeeds. *read*, when given, is told the size of each
+    # piece of *path* read, so a caller can show how far it has got.
     def self.extract(path : Path, dir : Path, root : String = "build",
-                     strip_root : Bool = false, executable_modes : Bool = false) : Int32
+                     strip_root : Bool = false, executable_modes : Bool = false,
+                     read : (Int32 -> Nil)? = nil) : Int32
       partial_created = false
       Dir.mkdir_p(dir.parent)
       partial = dir.parent / ".#{dir.basename}.#{Random::Secure.hex(4)}"
       Dir.mkdir(partial)
       partial_created = true
       files = File.open(path) do |file|
-        Compress::Gzip::Reader.open(file) { |gzip| Tar.new(gzip, path, root, strip_root, executable_modes).extract(partial) }
+        source = read ? Counting.new(file, read) : file
+        Compress::Gzip::Reader.open(source) { |gzip| Tar.new(gzip, path, root, strip_root, executable_modes).extract(partial) }
       end
       raise UserError.new("#{path} holds no files under #{root}/") if files == 0
       File.rename(partial, dir)
@@ -72,6 +75,22 @@ module Zane
       raise UserError.new("cannot unpack #{path}: #{error.message}")
     ensure
       FileUtils.rm_rf(partial) if partial_created && partial && Dir.exists?(partial)
+    end
+
+    # Reads through *io*, telling *count* how many bytes each read gave.
+    private class Counting < IO
+      def initialize(@io : IO, @count : Int32 -> Nil)
+      end
+
+      def read(slice : Bytes) : Int32
+        n = @io.read(slice)
+        @count.call(n)
+        n
+      end
+
+      def write(slice : Bytes) : NoReturn
+        raise IO::Error.new("cannot write to an archive being read")
+      end
     end
 
     # A tar stream, in the ustar layout with the pax and GNU long-name

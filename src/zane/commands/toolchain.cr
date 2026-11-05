@@ -15,7 +15,7 @@ module Zane::Commands
       when "install"
         raise UserError.new(USAGE) unless @args.size <= 2
         release = InstallProgress.run(@error) do |progress|
-          Zane::Toolchain.install(@args[1]?, progress: ->progress.stage(String))
+          Zane::Toolchain.install(@args[1]?, progress: progress)
         end
         @output.puts "Zane toolchain #{release.tag} is installed in #{Home.toolchains / release.tag}."
         0
@@ -53,7 +53,7 @@ module Zane::Commands
       release = InstallProgress.run(@error) do |progress|
         Zane::Toolchain.install(tag, @toolchains,
           vet: ->(r : CompilerRelease) { check_tag_move(r, locked) if r.tag == current; nil },
-          progress: ->progress.stage(String))
+          progress: progress)
       end
       if release.tag == current && same_commit?(release.commit, locked)
         @output.puts "The project is already built by #{current}, which is installed; nothing changed."

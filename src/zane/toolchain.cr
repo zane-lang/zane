@@ -3,6 +3,7 @@ require "./archive"
 require "./compiler"
 require "./compiler_release"
 require "./home"
+require "./install_progress"
 
 module Zane::Toolchain
   API = "https://api.github.com/repos/zane-lang/compiler/releases"
@@ -27,10 +28,10 @@ module Zane::Toolchain
   # Uses the latest published release by default, even when an older compiler
   # is installed or the current project pins another version. *vet* sees the
   # release and the commit its tag points to before anything is downloaded,
-  # and refuses it by raising.
+  # and refuses it by raising. *progress* is told each step as it happens.
   def self.install(tag : String? = nil, dir : Path = Home.toolchains,
                    platform : String = host, vet : (CompilerRelease -> Nil)? = nil,
-                   progress : (String -> Nil)? = nil) : CompilerRelease
+                   progress : InstallProgress? = nil) : CompilerRelease
     staging_created = false
     validate_tag(tag) if tag
     Dir.mkdir_p(dir)
@@ -38,7 +39,7 @@ module Zane::Toolchain
     Dir.mkdir(staging)
     staging_created = true
     metadata = staging / "release.json"
-    progress.try &.call("Looking up compiler release")
+    progress.try &.step(tag ? "Looking up compiler #{tag}" : "Looking up the latest compiler release")
     Archive.download.call(tag ? "#{API}/tags/#{tag}" : "#{API}/latest", metadata)
     release = JSON.parse(File.read(metadata))
     published_tag = release["tag_name"].as_s
@@ -53,8 +54,10 @@ module Zane::Toolchain
       raise UserError.new("compiler #{published_tag} has no toolchain archive and checksums for #{platform}; " \
                           "choose a release with that host platform, or build zanec from source")
     end
-    progress.try &.call("Resolving compiler #{published_tag}")
+    progress.try &.done("Found compiler #{published_tag} for #{platform}")
+    progress.try &.step("Resolving the commit of #{published_tag}")
     compiler = resolve.call(published_tag)
+    progress.try &.done("Compiler #{published_tag} is commit #{compiler.commit[0, 12]}")
     vet.try &.call(compiler)
     destination = dir / published_tag
     if File.exists?(destination) || File.symlink?(destination)
@@ -68,20 +71,29 @@ module Zane::Toolchain
     end
     base = "#{CompilerRelease::URL}/releases/download/#{published_tag}"
     sums = staging / "SHA256SUMS"
-    progress.try &.call("Downloading checksums for #{published_tag}")
+    progress.try &.step("Downloading checksums")
     Archive.download.call("#{base}/SHA256SUMS", sums)
     digest = checksum(File.read(sums), asset)
+    progress.try &.done("Downloaded checksums")
     archive = staging / asset
-    progress.try &.call("Downloading compiler #{published_tag} for #{platform}")
+    size = release["assets"].as_a.find { |a| a["name"].as_s == asset }.try(&.["size"]?).try(&.as_i64?)
+    progress.try &.step("Downloading compiler #{published_tag}", size) { File.info?(archive).try(&.size) || 0_i64 }
     Archive.download.call("#{base}/#{asset}", archive)
-    progress.try &.call("Verifying compiler #{published_tag}")
-    unless SHA256.file(archive) == digest
+    progress.try &.done("Downloaded #{asset}")
+    # The counters are read by the thread that draws the progress.
+    hashed = Atomic(Int64).new(0)
+    progress.try &.step("Verifying SHA-256", File.size(archive)) { hashed.get }
+    unless SHA256.file(archive, ->(n : Int32) { hashed.add(n.to_i64); nil }) == digest
       raise UserError.new("checksum mismatch for compiler #{published_tag}; the toolchain was not installed")
     end
+    progress.try &.done("Archive matches its SHA-256 #{digest[0, 12]}", bytes: false)
     extracted = staging / "toolchain"
-    progress.try &.call("Extracting compiler #{published_tag}")
-    Archive.extract(archive, extracted, root: asset.rchop(".tar.gz"), strip_root: true, executable_modes: true)
-    progress.try &.call("Checking compiler #{published_tag}")
+    unpacked = Atomic(Int64).new(0)
+    progress.try &.step("Extracting the archive", File.size(archive)) { unpacked.get }
+    files = Archive.extract(archive, extracted, root: asset.rchop(".tar.gz"), strip_root: true,
+      executable_modes: true, read: ->(n : Int32) { unpacked.add(n.to_i64); nil })
+    progress.try &.done("Extracted #{files} files", bytes: false)
+    progress.try &.step("Checking the toolchain")
     unless executable?(extracted / "bin" / Compiler::EXECUTABLE) &&
            File.file?(extracted / "VERSION") && File.read(extracted / "VERSION").strip == published_tag
       raise UserError.new("compiler #{published_tag} archive is missing its executable or has the wrong version")
@@ -90,10 +102,12 @@ module Zane::Toolchain
     unless from == CompilerRelease::URL && commit == compiler.commit
       raise UserError.new("compiler #{published_tag} archive's toolchain record does not match its release tag")
     end
+    progress.try &.done("Toolchain is #{published_tag} at commit #{compiler.commit[0, 12]}")
     # The complete directory becomes visible at once, on the same filesystem.
     raise UserError.new("#{destination} appeared during installation; retry the command") if File.exists?(destination) || File.symlink?(destination)
-    progress.try &.call("Installing compiler #{published_tag}")
+    progress.try &.step("Installing compiler #{published_tag}")
     File.rename(extracted, destination)
+    progress.try &.done("Installed compiler #{published_tag}")
     CompilerRelease.new(published_tag, compiler.commit, true)
   rescue error : JSON::ParseException | TypeCastError | KeyError
     raise UserError.new("invalid compiler release metadata: #{error.message}")
