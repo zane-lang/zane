@@ -26,12 +26,15 @@ class Zane::SHA256
     new.update(data).hexfinal
   end
 
-  def self.file(path : String | Path) : String
+  # The digest of the file at *path*. *read*, when given, is told the size of
+  # each piece hashed, so a caller can show how far it has got.
+  def self.file(path : String | Path, read : (Int32 -> Nil)? = nil) : String
     sha = new
     File.open(path) do |f|
       buffer = Bytes.new(64 * 1024)
       while (n = f.read(buffer)) > 0
         sha.update(buffer[0, n])
+        read.try &.call(n)
       end
     end
     sha.hexfinal
