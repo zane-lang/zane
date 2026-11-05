@@ -30,7 +30,7 @@ describe Zane::Progress do
       text.should contain "#{frames[0]} Verifying compiler v1.0"
       text.should contain "#{frames[1]} Verifying compiler v1.0"
       text.should contain "#{frames[2]} Verifying compiler v1.0"
-      terminal.to_s.should end_with "\r\e[K"
+      plain(terminal).should match /#{Regex.escape(Zane::Progress::DONE)} Installing compiler v1\.0 \(\d+\.\ds\)\n\z/
     end
   end
 
@@ -47,7 +47,8 @@ describe Zane::Progress do
       # The step still running when the block returns is done too, under its
       # own label.
       lines[1].should match /\r#{done} Checking the toolchain \(\d+\.\ds\)\z/
-      lines[2].should eq "\r"
+      lines[2].should eq ""
+      lines.size.should eq 3
     end
   end
 
@@ -103,8 +104,7 @@ describe Zane::Progress do
           raise Zane::UserError.new("download failed")
         end
       end
-      plain(terminal).should end_with "\r#{Zane::Progress::FAILED} Downloading compiler v1.0\n\r"
-      terminal.to_s.should end_with "\r\e[K"
+      plain(terminal).should end_with "\r#{Zane::Progress::FAILED} Downloading compiler v1.0\n"
     end
   end
 
@@ -214,6 +214,28 @@ describe Zane::Progress do
       Zane::Progress.current.should be outer
       Zane::Progress.current.enabled?.should be_false
       plain(terminal).should contain "#{Zane::Progress::DONE} Fetching"
+    end
+  end
+
+  it "leaves the last line a program printed after its step, though it ends with no newline" do
+    with_terminal do |terminal|
+      Zane::Progress.run(terminal) do |progress|
+        progress.step("Compiling bin/app/")
+        progress.done
+        terminal.print "program output with no newline"
+      end
+      terminal.to_s.should end_with "program output with no newline"
+    end
+  end
+
+  it "clears a step's line it drew when it stops without finishing the step" do
+    with_terminal do |terminal|
+      progress = Zane::Progress.new(terminal)
+      progress.step("Downloading")
+      wait_for_flushes(terminal, 1)
+      progress.@updates.close
+      progress.@worker.not_nil!.wait
+      terminal.to_s.should end_with "Downloading\e[K\r\e[K"
     end
   end
 

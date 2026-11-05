@@ -68,6 +68,10 @@ module Zane
 
     # The drawing thread's state.
     @step : Begin?
+    # Whether the line under the cursor is a redrawn step's, which cleanup
+    # must clear; once a step is finished, the line is whatever the command
+    # or a program it runs prints next, which stays.
+    @drawn = false
     @frame = 0
     @samples = Deque({Time::Instant, Int64}).new
     # The bar only ever narrows during a step, so it does not jitter.
@@ -193,8 +197,10 @@ module Zane
         ensure
           @updates.close
           @written.close
-          @output << "\r\e[K"
-          @output.flush
+          if @drawn
+            @output << "\r\e[K"
+            @output.flush
+          end
         end
       end
     end
@@ -211,15 +217,18 @@ module Zane
           @output << "\r\e[K" << paint(DONE, 32) << ' ' << (message.summary || step.label)
           @output << ' ' << paint("(#{summary(step, message)})", 2) << '\n'
           @output.flush
+          @drawn = false
         end
         @step = nil
       in Note
         @output << "\r\e[K" << paint(DONE, 32) << ' ' << message.text << '\n'
         @output.flush
+        @drawn = false
       in Fail
         if step = @step
           @output << "\r\e[K" << paint(FAILED, 31) << ' ' << step.label << '\n'
           @output.flush
+          @drawn = false
         end
         @step = nil
       end
@@ -245,6 +254,7 @@ module Zane
       @frame += 1
       @output << '\r' << spinner << ' ' << fit(step, columns - 3) << "\e[K"
       @output.flush
+      @drawn = true
     end
 
     # The running step's line, dropping its least useful details until it
