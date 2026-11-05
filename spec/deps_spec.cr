@@ -601,6 +601,28 @@ describe "the progress display" do
     end
   end
 
+  it "names up to three versions from the cache, then how many more" do
+    one = [{"math", "v1.0"}]
+    Zane::Graph.from_cache(one, "t").should eq "1 dependency's objects for t from the cache: math v1.0"
+    five = [{"a", "v1"}, {"b", "v2"}, {"c", "v3"}, {"d", "v4"}, {"e", "v5"}]
+    Zane::Graph.from_cache(five, "t").should eq "5 dependencies' objects for t from the cache: a v1, b v2, c v3, 2 more"
+  end
+
+  it "names the objects from the cache once, though several test packages link them" do
+    with_registry do |registry, project, _|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["fetch"], project)[0].should eq 0
+      %w(one two).each do |name|
+        Dir.mkdir_p(project / "test" / name)
+        File.write(project / "test" / name / "main.zn", "package test;\n")
+      end
+      _, lines = zane_on_terminal(["test"], project)
+      lines.count(&.includes?("from the cache")).should eq 1
+      lines.count(&.starts_with?("#{done} Compiled test/")).should eq 2
+    end
+  end
+
   it "shows a check of each package as a step" do
     with_registry do |_, project, _|
       _, lines = zane_on_terminal(["check"], project)

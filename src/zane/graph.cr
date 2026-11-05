@@ -85,6 +85,8 @@ module Zane
     @top = {} of String => Dependency
     # Each version remapping displaced, and the version chosen in its place.
     @chosen = {} of String => Package
+    # The targets whose objects from the cache the progress display named.
+    @noted = Set(String).new
 
     # Reads the graph of *workspace*, whose packages *layout* lays out.
     # *packages* is the cache. When *test*, it is the graph of a test build,
@@ -407,14 +409,17 @@ module Zane
           Dir.children(dest.parent).sort.map { |n| dest.parent / n }.select { |f| File.file?(f) }
         end
       end
-      progress.note(Graph.from_cache(cached, target)) unless cached.empty?
+      # A command that builds several packages, such as `test`, says it once.
+      if !cached.empty? && @noted.add?(target)
+        progress.note(Graph.from_cache(cached.map { |p| {p.key, p.tag} }, target))
+      end
       @chosen.empty? ? objects : remapped(objects, target, compiler)
     end
 
     # The line that names the versions whose objects for *target* came from
     # the cache: up to three by key and tag, then how many more.
-    def self.from_cache(packages : Array(Package), target : String) : String
-      shown = packages.first(3).map { |p| "#{p.key} #{p.tag}" }
+    def self.from_cache(packages : Array({String, String}), target : String) : String
+      shown = packages.first(3).map { |key, tag| "#{key} #{tag}" }
       shown << "#{packages.size - 3} more" if packages.size > 3
       objects = packages.size == 1 ? "1 dependency's objects" : "#{packages.size} dependencies' objects"
       "#{objects} for #{target} from the cache: #{shown.join(", ")}"
