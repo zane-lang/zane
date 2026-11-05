@@ -2,6 +2,7 @@ require "option_parser"
 require "../coda"
 require "../compiler_release"
 require "../errors"
+require "../progress"
 require "../home"
 require "../project"
 
@@ -72,7 +73,10 @@ module Zane::Commands
       start = choose_start(ask)
       pattern = choose_version_pattern(ask)
       git = choose_git(root, ask)
+      progress = Progress.current
+      progress.step("Finding the compiler release to pin")
       release = CompilerRelease.resolve(@zane_version, @compiler_url, @toolchains)
+      progress.done("Pinning compiler #{release.tag} (commit #{release.commit[0, 12]})")
       if git && !Process.find_executable("git")
         raise UserError.new("git is not installed; run again with --no-git")
       end

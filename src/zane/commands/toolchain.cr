@@ -1,5 +1,5 @@
 require "../toolchain"
-require "../install_progress"
+require "../progress"
 require "./deps"
 
 module Zane::Commands
@@ -14,7 +14,7 @@ module Zane::Commands
       case @args.first?
       when "install"
         raise UserError.new(USAGE) unless @args.size <= 2
-        release = InstallProgress.run(@error) do |progress|
+        release = Progress.run(@error) do |progress|
           Zane::Toolchain.install(@args[1]?, progress: progress)
         end
         @output.puts "Zane toolchain #{release.tag} is installed in #{Home.toolchains / release.tag}."
@@ -50,7 +50,7 @@ module Zane::Commands
       ws = workspace
       current, locked = ws.toolchain
       tag = @args[0]? || newest_in_major(current)
-      release = InstallProgress.run(@error) do |progress|
+      release = Progress.run(@error) do |progress|
         Zane::Toolchain.install(tag, @toolchains,
           vet: ->(r : CompilerRelease) { check_tag_move(r, locked) if r.tag == current; nil },
           progress: progress)
@@ -78,7 +78,11 @@ module Zane::Commands
     # naming the release (spec dependencies.md §2.3, §14).
     private def newest_in_major(current : String) : String
       major = CompilerRelease.version(current).not_nil![0]
-      CompilerRelease.newest(Zane::Toolchain.releases.call, major) ||
+      progress = Progress.current
+      progress.step("Listing the releases of #{CompilerRelease::URL}")
+      releases = Zane::Toolchain.releases.call
+      progress.done("Found #{releases.size} compiler #{releases.size == 1 ? "release" : "releases"}")
+      CompilerRelease.newest(releases, major) ||
         raise UserError.new("#{CompilerRelease::URL} has no release of major #{major}; name the release to move to")
     end
 

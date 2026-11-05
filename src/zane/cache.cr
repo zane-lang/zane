@@ -6,6 +6,7 @@ require "./errors"
 require "./git"
 require "./home"
 require "./package_url"
+require "./progress"
 
 module Zane
   # One version of one package in the package cache (spec dependencies.md §7):
@@ -47,6 +48,12 @@ module Zane
       @dir = packages.join(@url.normalized.split('/')) / @tag
     end
 
+    # How the progress display names the version: the last part of its URL
+    # and its tag, such as `json v1.2`.
+    def name : String
+      "#{@url.basename} #{@tag}"
+    end
+
     # The checkout of *commit*, which *tag* must point to. It is fetched when
     # the cache has none, or has another commit for the tag; a checkout already
     # at *commit* is used as it is, without going online, since the commit is
@@ -58,7 +65,16 @@ module Zane
         return src if head.starts_with?(commit) || commit.starts_with?(head)
         FileUtils.rm_rf(src)
       end
-      Git.checkout(@url.url, @tag, commit, src)
+      progress = Progress.current
+      progress.step("Fetching #{name} from #{@url}")
+      begin
+        Git.checkout(@url.url, @tag, commit, src)
+      rescue error
+        # Marked here, since a caller may recover and carry on.
+        progress.fail
+        raise error
+      end
+      progress.done("Fetched #{name} from #{@url} (commit #{commit[0, 12]})")
       src
     end
 
@@ -99,48 +115,53 @@ module Zane
     class NoTarget < UserError
     end
 
-    # The rewritten objects for *target*, which a program links. They are
-    # rewritten by *compiler* with the package's stamp. The cache reuses them
-    # only while they were made from the same commit and archive by the same
-    # compiler pin, *toolchain*: its tag and commit (§7).
-    def objects(commit : String, target : String, compiler : Compiler, toolchain : {String, String}) : Array(Path)
+    # The rewritten objects for *target*, which a program links, and whether
+    # the cache already held them. They are rewritten by *compiler* with the
+    # package's stamp. The cache reuses them only while they were made from
+    # the same commit and archive by the same compiler pin, *toolchain*: its
+    # tag and commit (§7).
+    def objects(commit : String, target : String, compiler : Compiler, toolchain : {String, String}) : {Array(Path), Bool}
       src = source(commit)
       url, sha256 = artifact(src, target)
       built = @dir / "build" / target
       record = @dir / "build" / "#{target}.coda"
       wanted = {"commit" => commit, "target" => target, "sha256" => sha256,
                 "zane-version" => toolchain[0], "zane-commit" => toolchain[1]}
-      return files(built) if Dir.exists?(built) && read_record(record) == wanted
+      return {files(built), true} if Dir.exists?(built) && read_record(record) == wanted
 
       originals = unpacked(target, url, sha256)
       rewrite(originals, built, compiler)
       write_record(record, wanted)
-      files(built)
+      {files(built), false}
     end
 
     # The object compiled from the checkout of *commit* for *target*, for a
     # dependency compiled from source (§12.1), with what the compiler wrote
     # beside it. It is kept apart from the release's objects, and reused
     # only while it was compiled from the same commit by the same compiler
-    # pin, *toolchain*. The block compiles it to the path it is given.
-    def compiled(commit : String, target : String, toolchain : {String, String}, & : Path ->) : Array(Path)
+    # pin, *toolchain*. The block compiles it to the path it is given. The
+    # second value says whether the cache already held it.
+    def compiled(commit : String, target : String, toolchain : {String, String}, & : Path ->) : {Array(Path), Bool}
       dir = @dir / "build-from-source"
       built = dir / target
       object = built / "package.o"
       record = dir / "#{target}.coda"
       wanted = {"commit" => commit, "target" => target,
                 "zane-version" => toolchain[0], "zane-commit" => toolchain[1]}
-      return files(built) if File.file?(object) && read_record(record) == wanted
+      return {files(built), true} if File.file?(object) && read_record(record) == wanted
 
       source(commit)
       Dir.mkdir_p(dir)
       partial = dir / ".#{target}.#{Random::Secure.hex(4)}"
       Dir.mkdir(partial)
+      progress = Progress.current
+      progress.step("Compiling #{name} from source for #{target}")
       yield partial / object.basename
+      progress.done("Compiled #{name} from source for #{target}")
       FileUtils.rm_rf(built)
       File.rename(partial, built)
       write_record(record, wanted)
-      files(built)
+      {files(built), false}
     ensure
       FileUtils.rm_rf(partial) if partial && Dir.exists?(partial)
     end
@@ -151,12 +172,21 @@ module Zane
       dir = @dir / "artifacts" / target
       archive = dir / "archive.tar.gz"
       originals = dir / "build"
-      if File.file?(archive) && SHA256.file(archive) == sha256 && Dir.exists?(originals)
-        return originals
+      progress = Progress.current
+      if File.file?(archive) && Dir.exists?(originals)
+        # The counters are read by the thread that draws the progress.
+        hashed = Atomic(Int64).new(0)
+        progress.step("Checking the kept archive of #{name}", File.size(archive)) { hashed.get }
+        kept = SHA256.file(archive, ->(n : Int32) { hashed.add(n.to_i64); nil }) == sha256
+        progress.done(kept ? "Kept archive of #{name} matches its SHA-256" : "Kept archive of #{name} has changed; fetching it again", amount: false)
+        return originals if kept
       end
       FileUtils.rm_rf(dir)
-      Archive.fetch(url, sha256, archive)
-      Archive.extract(archive, dir / "unpacked")
+      Archive.fetch(url, sha256, archive, "#{name} objects for #{target}")
+      unpacked = Atomic(Int64).new(0)
+      progress.step("Unpacking #{name}", File.size(archive)) { unpacked.get }
+      files = Archive.extract(archive, dir / "unpacked", read: ->(n : Int32) { unpacked.add(n.to_i64); nil })
+      progress.done("Unpacked #{name} (#{files} #{files == 1 ? "file" : "files"})", amount: false)
       File.rename(dir / "unpacked" / "build", originals)
       Dir.delete(dir / "unpacked")
       originals
@@ -169,7 +199,11 @@ module Zane
     private def rewrite(originals : Path, built : Path, compiler : Compiler) : Nil
       partial = built.parent / ".#{built.basename}.#{Random::Secure.hex(4)}"
       stamp = @url.stamp(@tag)
-      files(originals).each do |original|
+      originals_files = files(originals)
+      rewritten = Atomic(Int64).new(0)
+      progress = Progress.current
+      progress.step("Rewriting #{name}'s objects", originals_files.size.to_i64, "files") { rewritten.get }
+      originals_files.each do |original|
         output = partial.join(original.relative_to(originals).parts)
         Dir.mkdir_p(output.parent)
         error = IO::Memory.new
@@ -177,7 +211,9 @@ module Zane
         unless status == 0
           raise UserError.new("the compiler could not rewrite #{original}:\n#{error.to_s.strip}")
         end
+        rewritten.add(1)
       end
+      progress.done("Rewrote #{name}'s objects with its stamp")
       FileUtils.rm_rf(built)
       File.rename(partial, built)
     ensure

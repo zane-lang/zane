@@ -7,6 +7,7 @@ require "./home"
 require "./layout"
 require "./manifest"
 require "./package_url"
+require "./progress"
 require "./remap"
 require "./target"
 require "./workspace"
@@ -84,6 +85,8 @@ module Zane
     @top = {} of String => Dependency
     # Each version remapping displaced, and the version chosen in its place.
     @chosen = {} of String => Package
+    # The targets whose objects from the cache the progress display named.
+    @noted = Set(String).new
 
     # Reads the graph of *workspace*, whose packages *layout* lays out.
     # *packages* is the cache. When *test*, it is the graph of a test build,
@@ -378,24 +381,48 @@ module Zane
     # the file of its C modules' hashes, when its C has any, which the
     # compiler compares before it inlines the package's C (compiler
     # docs/design/ffi.md F13, F15); it carries no symbols to remap.
+    #
+    # The progress display shows each step that does work, and the versions
+    # whose objects the cache already held, prebuilt or compiled, in one line.
     def objects(target : String, compiler : Compiler) : Array(Path)
+      progress = Progress.current
+      cached = [] of Package
       objects = linked.flat_map do |p|
         entry = p.entry
         case p.from
         in .release?
-          entry.not_nil!.objects(p.commit, target, compiler, @workspace.toolchain)
+          files, hit = entry.not_nil!.objects(p.commit, target, compiler, @workspace.toolchain)
+          cached << p if hit
+          files
         in .source?
-          entry.not_nil!.compiled(p.commit, target, @workspace.toolchain) { |dest| compile(p, target, compiler, dest) }
+          files, hit = entry.not_nil!.compiled(p.commit, target, @workspace.toolchain) { |dest| compile(p, target, compiler, dest) }
+          cached << p if hit
+          files
         in .path?
           dest = @workspace.out_dir / "deps" / target / p.url.identity_hash / p.tag / "package.o"
           # The directory holds only this build's files, which are all linked.
           FileUtils.rm_rf(dest.parent)
           Dir.mkdir_p(dest.parent)
+          progress.step("Compiling #{p.key} from #{p.layout.root} for #{target}")
           compile(p, target, compiler, dest)
+          progress.done("Compiled #{p.key} from #{p.layout.root} for #{target}")
           Dir.children(dest.parent).sort.map { |n| dest.parent / n }.select { |f| File.file?(f) }
         end
       end
+      # A command that builds several packages, such as `test`, says it once.
+      if !cached.empty? && @noted.add?(target)
+        progress.note(Graph.from_cache(cached.map { |p| {p.key, p.tag} }, target))
+      end
       @chosen.empty? ? objects : remapped(objects, target, compiler)
+    end
+
+    # The line that names the versions whose objects for *target* came from
+    # the cache: up to three by key and tag, then how many more.
+    def self.from_cache(packages : Array({String, String}), target : String) : String
+      shown = packages.first(3).map { |key, tag| "#{key} #{tag}" }
+      shown << "#{packages.size - 3} more" if packages.size > 3
+      objects = packages.size == 1 ? "1 dependency's objects" : "#{packages.size} dependencies' objects"
+      "#{objects} for #{target} from the cache: #{shown.join(", ")}"
     end
 
     # Compiles *package*'s library packages on their own into the object
@@ -434,7 +461,11 @@ module Zane
       FileUtils.rm_rf(dir)
       Dir.mkdir_p(dir)
       pairs = @chosen.map { |node, chosen| {@nodes[node].stamp, chosen.stamp} }
-      objects.map_with_index do |object, i|
+      progress = Progress.current
+      done = Atomic(Int64).new(0)
+      progress.step("Remapping displaced versions in the objects", objects.size.to_i64, "files") { done.get }
+      result = objects.map_with_index do |object, i|
+        done.add(1)
         next object if Graph.hashes?(object)
         dest = dir / "#{i}-#{object.basename}"
         input = object
@@ -450,6 +481,8 @@ module Zane
         end
         dest
       end
+      progress.done("Remapped #{@chosen.size} displaced #{@chosen.size == 1 ? "version" : "versions"} in the objects")
+      result
     end
   end
 end

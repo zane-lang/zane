@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "./support/terminal"
 require "compress/gzip"
 
 # Builds a tar archive of *entries*, each a path, a type flag and contents,
@@ -142,8 +143,7 @@ private def with_registry(&)
   end
 end
 
-private def zane(args : Array(String), dir : Path) : {Int32, String, String}
-  output, error = IO::Memory.new, IO::Memory.new
+private def zane(args : Array(String), dir : Path, output : IO = IO::Memory.new, error : IO = IO::Memory.new) : {Int32, String, String}
   command = args.first
   rest = args[1..]
   status = case command
@@ -174,6 +174,17 @@ end
 # Installs the fake compiler as the compiler release *tag*, which `zane
 # toolchain update` then finds installed rather than downloading it, and runs
 # that command in *project*.
+# Runs *args* as `zane` does on a terminal, and returns its status and the
+# lines of the progress display it left, without their colours.
+private def zane_on_terminal(args : Array(String), dir : Path) : {Int32, Array(String)}
+  with_terminal do |terminal|
+    status = Zane::Progress.run(terminal) { zane(args, dir, IO::Memory.new, terminal)[0] }
+    lines = terminal.to_s.gsub(/\e\[[0-9;]*[mK]/, "").lines.map(&.split('\r').last.chomp).reject(&.empty?)
+    return {status, lines}
+  end
+  raise "unreachable"
+end
+
 private def toolchain_update(registry : Registry, project : Path, tag : String) : {Int32, String, String}
   dir = Zane::Home.toolchains / tag
   Dir.mkdir_p(dir / "bin")
@@ -223,6 +234,20 @@ describe Zane::PackageUrl do
 end
 
 describe Zane::Archive do
+  it "tells a caller how much of the archive it has read while unpacking, up to the whole archive" do
+    dir = Path[File.join(Dir.tempdir, "zane-spec-extract-#{Random::Secure.hex(6)}")]
+    Dir.mkdir_p(dir)
+    archive = dir / "a.tar.gz"
+    File.write(archive, tar_gz([{"build/", '5', ""}, {"build/a.o", '0', "a" * 300_000}]))
+    read = 0_i64
+    begin
+      Zane::Archive.extract(archive, dir / "out", read: ->(n : Int32) { read += n; nil }).should eq 1
+      read.should eq File.size(archive)
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "unpacks the files under build/" do
     with_registry do |registry|
       archive = registry.dir / "a.tar.gz"
@@ -595,6 +620,121 @@ describe Zane::Commands::Add do
       zane(["check"], project)[0].should eq 0
       id = "#{registry.stamp("math-lib", "v1.0")}math"
       File.read_lines(log).last.should end_with "--package #{id}=#{entry("math-lib", "v1.0") / "src" / "lib" / "math"} --import app:math=#{id}"
+    end
+  end
+end
+
+describe "the progress display" do
+  done = Zane::Progress::DONE
+
+  it "shows each step of preparing a release's objects, then only the cache on the next build" do
+    with_registry do |registry, project, _|
+      registry.publish("math", "v1.0")
+      status, lines = zane_on_terminal(["add", registry.url("math")], project)
+      status.should eq 0
+      lines[0].should match /\A#{Regex.escape(done)} Found 1 tag at #{Regex.escape(registry.url("math"))} \(\d+\.\ds\)\z/
+      lines[1].should start_with "#{done} Fetched math v1.0 from #{registry.url("math")} (commit "
+
+      host = Zane::Target::HOST
+      status, lines = zane_on_terminal(["build"], project)
+      status.should eq 0
+      lines.map(&.sub(/ \([^()]*\)\z/, "")).should eq [
+        "#{done} Downloaded math v1.0 objects for #{host}",
+        "#{done} Archive matches its SHA-256 #{File.read(registry.dir / "math" / "zane-artifacts.coda")[/[0-9a-f]{64}/][0, 12]}",
+        "#{done} Unpacked math v1.0 (1 file)",
+        "#{done} Rewrote math v1.0's objects with its stamp",
+        "#{done} Compiled bin/app/, optimized, with its dependencies' code compiled from source to inline it",
+      ]
+      lines[3].should match /\(1 file in \d+\.\ds\)\z/
+
+      status, lines = zane_on_terminal(["build"], project)
+      status.should eq 0
+      lines.map(&.sub(/ \([^()]*\)\z/, "")).should eq [
+        "#{done} 1 dependency's objects for #{host} from the cache: math v1.0",
+        "#{done} Compiled bin/app/, optimized, with its dependencies' code compiled from source to inline it",
+      ]
+      lines[0].should_not contain "s)"
+    end
+  end
+
+  it "says a dependency was compiled from source, and only the next time that it came from the cache" do
+    with_registry do |registry, project, _|
+      registry.publish("math", "v1.0", artifacts: false)
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
+      host = Zane::Target::HOST
+      _, lines = zane_on_terminal(["fetch"], project)
+      lines.any?(&.starts_with?("#{done} Compiled math v1.0 from source for #{host} (")).should be_true
+      lines.none?(&.includes?("from the cache")).should be_true
+      _, lines = zane_on_terminal(["fetch"], project)
+      lines.should eq ["#{done} 1 dependency's objects for #{host} from the cache: math v1.0"]
+    end
+  end
+
+  it "checks a kept archive again before rewriting its objects for another compiler pin" do
+    with_registry do |registry, project, _|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["fetch"], project)[0].should eq 0
+      lock = project / "zane-lock.coda"
+      File.write(lock, File.read(lock).sub("0123456789abcdef0123456789abcdef01234567", "fedcba9876543210fedcba9876543210fedcba98"))
+      _, lines = zane_on_terminal(["fetch"], project)
+      lines.map(&.sub(/ \([^()]*\)\z/, "")).should eq [
+        "#{done} Kept archive of math v1.0 matches its SHA-256",
+        "#{done} Rewrote math v1.0's objects with its stamp",
+      ]
+    end
+  end
+
+  it "marks a failed compile and shows the compiler's output after it" do
+    with_registry do |_, project, _|
+      ENV["FAKE_ZANEC_STATUS"] = "1"
+      with_terminal do |terminal|
+        status = Zane::Progress.run(terminal) { zane(["build"], project, IO::Memory.new, terminal)[0] }
+        status.should eq 1
+        terminal.to_s.gsub(/\e\[[0-9;]*m/, "").should contain(
+          "#{Zane::Progress::FAILED} Compiling bin/app/, optimized\nfake compiler error\n")
+      end
+    end
+  end
+
+  it "marks a failed fetch, though the command recovers and carries on" do
+    with_registry do |registry, project, _|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      FileUtils.rm_rf(Zane::Home.packages)
+      FileUtils.mv(registry.dir / "math", registry.dir / "gone")
+      status, lines = zane_on_terminal(["remove", "math"], project)
+      status.should eq 0
+      lines.map(&.sub(/ \([^()]*\)\z/, "")).should eq ["#{Zane::Progress::FAILED} Fetching math v1.0 from #{registry.url("math")}"]
+    end
+  end
+
+  it "names up to three versions from the cache, then how many more" do
+    one = [{"math", "v1.0"}]
+    Zane::Graph.from_cache(one, "t").should eq "1 dependency's objects for t from the cache: math v1.0"
+    five = [{"a", "v1"}, {"b", "v2"}, {"c", "v3"}, {"d", "v4"}, {"e", "v5"}]
+    Zane::Graph.from_cache(five, "t").should eq "5 dependencies' objects for t from the cache: a v1, b v2, c v3, 2 more"
+  end
+
+  it "names the objects from the cache once, though several test packages link them" do
+    with_registry do |registry, project, _|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["fetch"], project)[0].should eq 0
+      %w(one two).each do |name|
+        Dir.mkdir_p(project / "test" / name)
+        File.write(project / "test" / name / "main.zn", "package test;\n")
+      end
+      _, lines = zane_on_terminal(["test"], project)
+      lines.count(&.includes?("from the cache")).should eq 1
+      lines.count(&.starts_with?("#{done} Compiled test/")).should eq 2
+    end
+  end
+
+  it "shows a check of each package as a step" do
+    with_registry do |_, project, _|
+      _, lines = zane_on_terminal(["check"], project)
+      lines.map(&.sub(/ \([^()]*\)\z/, "")).should eq ["#{done} Checked bin/app/"]
     end
   end
 end

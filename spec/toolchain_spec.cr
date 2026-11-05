@@ -137,7 +137,7 @@ describe Zane::Toolchain do
       with_terminal do |terminal|
         output = IO::Memory.new
         Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 0
-        done = Regex.escape(Zane::InstallProgress::DONE)
+        done = Regex.escape(Zane::Progress::DONE)
         steps = terminal.to_s.gsub(/\e\[[0-9;]*[mK]/, "").lines.map(&.split('\r').last)
         [/\A#{done} Found compiler v1\.0 for #{Zane::Toolchain.host} \(\d+\.\ds\)$/,
          /\A#{done} Compiler v1\.0 is commit #{"a" * 12} /,
@@ -149,8 +149,8 @@ describe Zane::Toolchain do
          /\A#{done} Installed compiler v1\.0 /].zip(steps) do |expected, step|
           step.should match expected
         end
-        steps.size.should eq 9
-        terminal.to_s.should end_with "\r\e[K"
+        steps.size.should eq 8
+        terminal.to_s.should end_with "\n"
         output.to_s.should eq "Zane toolchain v1.0 is installed in #{Zane::Home.toolchains / "v1.0"}.\n"
       end
     end
@@ -163,7 +163,7 @@ describe Zane::Toolchain do
       with_terminal do |terminal|
         output = IO::Memory.new
         Zane::CLI.run(["toolchain", "install"], output, terminal).should eq 1
-        terminal.to_s.gsub(/\e\[[0-9;]*m/, "").should contain "#{Zane::InstallProgress::FAILED} Downloading compiler v1.0\n\r\e[Kzane: 404"
+        terminal.to_s.gsub(/\e\[[0-9;]*m/, "").should contain "#{Zane::Progress::FAILED} Downloading compiler v1.0\nzane: 404"
         output.to_s.should eq ""
         Dir.children(Zane::Home.toolchains).should be_empty
       end
@@ -364,7 +364,7 @@ describe Zane::Toolchain do
           output = IO::Memory.new
           Zane::Commands::ToolchainUpdate.new([] of String, output, terminal, project).run.should eq 0
           terminal.to_s.should contain "Downloading compiler v1.3"
-          terminal.to_s.should end_with "\r\e[K"
+          terminal.to_s.should end_with "\n"
           output.to_s.should contain "Updated zane v1.0 -> v1.3"
         end
       end
