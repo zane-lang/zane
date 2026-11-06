@@ -26,7 +26,7 @@ belongs to the compiler instead.
 | Reading, validating and writing `zane.coda` and `zane-lock.coda` | Rewriting the `!` placeholder prefix of a library's exports |
 | Resolving tags, verifying commits and archive hashes | Linking a program with the runtime it carries |
 | The global package cache | Cross-compilation for `--target` |
-| Installing compilers and running the pinned one | Writing a library's objects for a release |
+| Installing compilers and running the pinned one, and updating itself (§4.2) | Writing a library's objects for a release |
 
 The interface between the two is a contract (§5). A change to it is the one
 kind of change that can break a project nobody touched.
@@ -344,6 +344,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
 | `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and the `zane` lock row's commit together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than the lock row pins has moved, and is refused with a security error without the flag. |
+| `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named (§4.2). Works outside a project and changes none. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed: the one program, or the one named when there are several. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
@@ -370,6 +371,31 @@ or conflicting directories are preserved and reported. Installing does not
 change any project's compiler pin. A directory without a record is an interrupted install
 and is ignored, as is a toolchain from another `url`. A toolchain is found from
 its record alone; the compiler is never asked what it is.
+
+### 4.2 Updating `zane` itself
+
+`zane self update [tag]` installs a release of the CLI from
+[`zane-lang/zane`](https://github.com/zane-lang/zane/releases) over the binary
+that is running. It finds the release through the GitHub API, as
+`toolchain install` does, and checks the binary as the installers do. Without a
+tag it takes the latest release, and only when that is newer than the running
+binary; a tag names any release, older ones included. Versions compare as
+numbers, so `v0.2` and `v0.2.0` are the same release. A release names its
+binaries `zane-linux-x86_64`, `zane-macos-arm64` and `zane-windows-x86_64.exe`,
+and the update downloads the one for its host into a directory beside the
+binary, checks it against the release's `SHA256SUMS`, runs it with
+`--version` to check that it starts and is that release, and then renames it
+over the old binary, so an interrupted update leaves one or the other whole.
+Windows does not replace a running executable but does rename it, so there the
+old binary is moved aside first, under a name starting `.zane-old-`, and the
+next run of `zane` deletes it.
+
+A binary whose real path lies in the Nix store or a Homebrew `Cellar` belongs
+to that package manager, and a development build, whose version is not a
+release tag, to its source tree, so the update refuses both and names what
+updates them instead. The update writes only in the directory that holds the
+binary, so it needs the access to it that installing did. Updating the CLI
+changes no project and installs no compiler (§1).
 
 ---
 
@@ -463,8 +489,8 @@ subpackage it tests
 2. **Dependencies.** `add`, `remove`, `update`, `dev`, `remap`, `fetch`,
    `tree`, and the cache (§3, §3.1). Built.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
-4. **Toolchains.** `toolchain install [tag]` and `toolchain update [tag]`.
-   Built.
+4. **Toolchains.** `toolchain install [tag]` and `toolchain update [tag]`,
+   and `self update [tag]` for the CLI itself (§4.2). Built.
 5. **Layout and tests.** The `lib/`, `bin/` and `test/` layout with
    subpackages, programs per directory of `bin/`, `test`, the `test-deps`
    block, `add --test`, `tree --test`, and the packages `init` writes (§2.5).

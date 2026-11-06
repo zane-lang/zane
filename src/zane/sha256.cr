@@ -1,3 +1,5 @@
+require "./errors"
+
 # SHA-256 (FIPS 180-4) in Crystal, so the binary needs no OpenSSL. Every
 # archive a fetch downloads is checked against the hash its library committed
 # (spec dependencies.md §5), so this is the one cryptographic primitive the
@@ -24,6 +26,18 @@ class Zane::SHA256
 
   def self.hexdigest(data : Bytes | String) : String
     new.update(data).hexfinal
+  end
+
+  # The digest a release's `SHA256SUMS` lists for *name*, in the format
+  # `sha256sum` and `shasum -a 256` write, lowercased. It must be listed once.
+  def self.listed(sums : String, name : String) : String
+    matches = sums.lines.compact_map do |line|
+      if match = /\A([0-9a-fA-F]{64})[ \t]+\*?#{Regex.escape(name)}\z/.match(line)
+        match[1].downcase
+      end
+    end
+    raise UserError.new("SHA256SUMS must contain exactly one valid checksum for #{name}") unless matches.size == 1
+    matches.first
   end
 
   # The digest of the file at *path*. *read*, when given, is told the size of

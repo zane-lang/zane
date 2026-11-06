@@ -76,7 +76,7 @@ module Zane::Toolchain
     sums = staging / "SHA256SUMS"
     progress.step("Downloading checksums")
     Archive.download.call("#{base}/SHA256SUMS", sums)
-    digest = checksum(File.read(sums), asset)
+    digest = SHA256.listed(File.read(sums), asset)
     progress.done("Downloaded checksums")
     archive = staging / asset
     size = release["assets"].as_a.find { |a| a["name"].as_s == asset }.try(&.["size"]?).try(&.as_i64?)
@@ -132,15 +132,5 @@ module Zane::Toolchain
     {% else %}
       File.file?(path) && File::Info.executable?(path)
     {% end %}
-  end
-
-  private def self.checksum(text : String, asset : String) : String
-    matches = text.lines.compact_map do |line|
-      if match = /\A([0-9a-fA-F]{64})[ \t]+\*?#{Regex.escape(asset)}\z/.match(line)
-        match[1].downcase
-      end
-    end
-    raise UserError.new("SHA256SUMS must contain exactly one valid checksum for #{asset}") unless matches.size == 1
-    matches.first
   end
 end

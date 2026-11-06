@@ -6,6 +6,7 @@ require "./commands/cache"
 require "./commands/deps"
 require "./commands/init"
 require "./commands/inspect"
+require "./commands/self"
 require "./commands/toolchain"
 
 module Zane::CLI
@@ -35,6 +36,7 @@ module Zane::CLI
       cache list|path|clean  show, locate or empty the package cache
       toolchain install [version]  install the latest compiler release, or the version named
       toolchain update [version]   install it, and build the project with it from now on
+      self update [version]  replace this zane with the latest release, or the version named
       help                   show this text
       version                show the version of zane
 
@@ -73,6 +75,7 @@ module Zane::CLI
       when "tree"      then Commands::Tree.new(args[1..], stdout, stderr).run
       when "cache"     then Commands::Cache.new(args[1..], stdout, stderr).run
       when "toolchain" then Commands::Toolchain.new(args[1..], stdout, stderr).run
+      when "self"      then Commands::SelfCommand.new(args[1..], stdout, stderr).run
       else
         stderr.puts "zane: unknown command `#{args.first}`"
         stderr.puts USAGE

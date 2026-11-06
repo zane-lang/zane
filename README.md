@@ -37,12 +37,27 @@ zane --version
 
 It verifies the binary's SHA-256, installs into
 `%LOCALAPPDATA%\Programs\Zane\bin`, and adds that folder to your user `Path`
-and the current terminal's `Path`. Run it again to update. To choose a version,
+and the current terminal's `Path`. To choose a version,
 append `-Version v0.0` to the installer command.
 
 Both commands work after the first release is published. You can also download
 the binaries and installers from [Releases](https://github.com/zane-lang/zane/releases)
 and inspect the scripts before running them. No administrator access is needed.
+
+### Updating zane
+
+Replace the installed `zane` with the latest release, or with the version named:
+
+```sh
+zane self update
+zane self update v0.12
+```
+
+It verifies the new binary's SHA-256 and checks that it runs before replacing
+the old one, which stays in place if anything fails. It writes only in the
+directory that holds `zane`, so run it as the user that installed it. A `zane` that a package
+manager installed is updated with that package manager instead. Updating the
+CLI changes no project; the compiler is updated separately, as below.
 
 ### The compiler
 
