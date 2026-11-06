@@ -54,7 +54,8 @@ zane self update v0.12
 ```
 
 It verifies the new binary's SHA-256 and checks that it runs before replacing
-the old one, which stays in place if anything fails. A `zane` that a package
+the old one, which stays in place if anything fails. It writes only in the
+directory that holds `zane`, so run it as the user that installed it. A `zane` that a package
 manager installed is updated with that package manager instead. Updating the
 CLI changes no project; the compiler is updated separately, as below.
 

@@ -26,7 +26,7 @@ belongs to the compiler instead.
 | Reading, validating and writing `zane.coda` and `zane-lock.coda` | Rewriting the `!` placeholder prefix of a library's exports |
 | Resolving tags, verifying commits and archive hashes | Linking a program with the runtime it carries |
 | The global package cache | Cross-compilation for `--target` |
-| Installing compilers and running the pinned one | Writing a library's objects for a release |
+| Installing compilers and running the pinned one, and updating itself (§4.2) | Writing a library's objects for a release |
 
 The interface between the two is a contract (§5). A change to it is the one
 kind of change that can break a project nobody touched.
@@ -376,9 +376,11 @@ its record alone; the compiler is never asked what it is.
 
 `zane self update [tag]` installs a release of the CLI from
 [`zane-lang/zane`](https://github.com/zane-lang/zane/releases) over the binary
-that is running, by the same steps as `install.sh` and `install.ps1`. Without a
+that is running. It finds the release through the GitHub API, as
+`toolchain install` does, and checks the binary as the installers do. Without a
 tag it takes the latest release, and only when that is newer than the running
-binary; a tag names any release, older ones included. A release names its
+binary; a tag names any release, older ones included. Versions compare as
+numbers, so `v0.2` and `v0.2.0` are the same release. A release names its
 binaries `zane-linux-x86_64`, `zane-macos-arm64` and `zane-windows-x86_64.exe`,
 and the update downloads the one for its host into a directory beside the
 binary, checks it against the release's `SHA256SUMS`, runs it with
@@ -391,8 +393,9 @@ next run of `zane` deletes it.
 A binary whose real path lies in the Nix store or a Homebrew `Cellar` belongs
 to that package manager, and a development build, whose version is not a
 release tag, to its source tree, so the update refuses both and names what
-updates them instead. Updating the CLI changes no project and installs no
-compiler (§1).
+updates them instead. The update writes only in the directory that holds the
+binary, so it needs the access to it that installing did. Updating the CLI
+changes no project and installs no compiler (§1).
 
 ---
 

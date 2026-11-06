@@ -70,7 +70,13 @@ module Zane
                           "rebuild it, or install a release with install.sh or install.ps1") unless installed
 
       staging = target.parent / ".zane-update-#{Random::Secure.hex(8)}"
-      Dir.mkdir(staging)
+      begin
+        Dir.mkdir(staging)
+      rescue File::AccessDeniedError
+        staging = nil
+        raise UserError.new("cannot write to #{target.parent}, where zane is installed; " \
+                            "run the update as the user that installed it")
+      end
       progress.step(tag ? "Looking up zane #{tag}" : "Looking up the latest zane release")
       metadata = staging / "release.json"
       Archive.download.call(tag ? "#{API}/tags/#{tag}" : "#{API}/latest", metadata)
@@ -84,14 +90,16 @@ module Zane
         raise UserError.new("zane #{published} has no #{asset} and checksums; choose another release")
       end
       progress.done("Found zane #{published}")
-      return Result.new(published, Outcome::Current, target) if published == @@current
-      return Result.new(published, Outcome::Newer, target) if !tag && version(published).not_nil! < installed
+      # v0.2 and v0.2.0 are one release, so versions compare as numbers.
+      latest = version(published).not_nil!
+      return Result.new(published, Outcome::Current, target) if latest == installed
+      return Result.new(published, Outcome::Newer, target) if !tag && latest < installed
 
       base = "#{URL}/releases/download/#{published}"
       sums = staging / "SHA256SUMS"
       progress.step("Downloading checksums")
       Archive.download.call("#{base}/SHA256SUMS", sums)
-      digest = checksum(File.read(sums), asset)
+      digest = SHA256.listed(File.read(sums), asset)
       progress.done("Downloaded checksums")
       binary = staging / target.basename
       size = release["assets"].as_a.find { |a| a["name"].as_s == asset }.try(&.["size"]?).try(&.as_i64?)
@@ -137,13 +145,17 @@ module Zane
     # so an update that overwrote them would be undone or break its records.
     private def self.check_installed_by_installer(target : Path) : Nil
       path = (File.realpath(target) rescue target.to_s).gsub('\\', '/')
-      manager = if path.starts_with?("/nix/store/")
-                  "Nix"
-                elsif path.includes?("/Cellar/")
-                  "Homebrew"
-                end
-      return unless manager
+      return unless manager = package_manager(path)
       raise UserError.new("#{path} was installed by #{manager}; update zane with #{manager} instead")
+    end
+
+    # The package manager that owns the file at the real path *path*, if any.
+    def self.package_manager(path : String) : String?
+      if path.starts_with?("/nix/store/")
+        "Nix"
+      elsif path.includes?("/Cellar/")
+        "Homebrew"
+      end
     end
 
     # The binary must start on this machine and be the release it claims.
@@ -181,16 +193,6 @@ module Zane
       {% else %}
         File.rename(binary, target)
       {% end %}
-    end
-
-    private def self.checksum(text : String, asset : String) : String
-      matches = text.lines.compact_map do |line|
-        if match = /\A([0-9a-f]{64})  #{Regex.escape(asset)}\z/.match(line)
-          match[1]
-        end
-      end
-      raise UserError.new("SHA256SUMS must contain exactly one valid checksum for #{asset}") unless matches.size == 1
-      matches.first
     end
   end
 end

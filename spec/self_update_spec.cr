@@ -114,6 +114,30 @@ describe Zane::SelfUpdate do
     end
   end
 
+  it "counts a missing patch as 0, so v0.2.0 is already v0.2" do
+    with_cli_releases("v0.2.0") do |registry|
+      registry.publish("v0.2")
+      status, output, _ = self_update
+      status.should eq 0
+      output.should contain "zane v0.2 is already installed"
+      File.read(registry.executable).should eq "old zane"
+    end
+  end
+
+  it "names the binary this host's releases publish" do
+    workflow = File.read(Path[__DIR__].parent / ".github" / "workflows" / "release.yml")
+    if asset = Zane::SelfUpdate.asset
+      workflow.should contain " dist/#{asset}\n"
+      workflow.should match(/sha256sum .*\b#{Regex.escape(asset)}\b/)
+    end
+  end
+
+  it "knows the files Nix and Homebrew own" do
+    Zane::SelfUpdate.package_manager("/nix/store/abc-zane-0.2/bin/zane").should eq "Nix"
+    Zane::SelfUpdate.package_manager("/opt/homebrew/Cellar/zane/0.2/bin/zane").should eq "Homebrew"
+    Zane::SelfUpdate.package_manager("/home/me/.local/bin/zane").should be_nil
+  end
+
   it "does not move to an older latest release unless it is named" do
     with_cli_releases("v0.3") do |registry|
       registry.publish("v0.2")
