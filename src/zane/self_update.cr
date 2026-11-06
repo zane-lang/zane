@@ -71,7 +71,8 @@ module Zane
 
       staging = target.parent / ".zane-update-#{Random::Secure.hex(8)}"
       begin
-        Dir.mkdir(staging)
+        # Private, so no other user can swap the binary after it is verified.
+        Dir.mkdir(staging, 0o700)
       rescue File::AccessDeniedError
         staging = nil
         raise UserError.new("cannot write to #{target.parent}, where zane is installed; " \
