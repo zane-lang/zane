@@ -13,13 +13,16 @@ module Zane::Toolchain
   # And the listing of the release tags.
   class_property releases : Proc(Array(String)) = -> { CompilerRelease.listed.keys }
 
+  # The platform a compiler release names its archive for, as
+  # zane-lang/compiler's dev/release/ packagers do: AArch64 is `aarch64`
+  # there, where this CLI's own binaries say `arm64` (SelfUpdate).
   def self.host : String
     {% if flag?(:win32) %}
       "windows-x86_64"
     {% elsif flag?(:darwin) %}
-      "macos-{{ (flag?(:aarch64) ? "arm64" : "x86_64").id }}"
+      "macos-{{ (flag?(:aarch64) ? "aarch64" : "x86_64").id }}"
     {% elsif flag?(:linux) %}
-      "linux-{{ (flag?(:aarch64) ? "arm64" : "x86_64").id }}"
+      "linux-{{ (flag?(:aarch64) ? "aarch64" : "x86_64").id }}"
     {% else %}
       raise UserError.new("compiler toolchain installation is not supported on this operating system")
     {% end %}
