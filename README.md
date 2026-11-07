@@ -100,10 +100,12 @@ commit into `zane-lock.coda`. Nothing is compiled until the next `zane build`,
 `run`, `test` or `fetch`, so a dependency the new compiler cannot build as
 pinned can be moved with `zane update` first.
 
-The compiler release workflow currently provides **Linux x86_64** archives,
-including LLVM libraries and Zig for building Linux and Windows programs.
-Other CLI host platforms report a missing compiler archive until native
-compiler releases are available for them. A tag without binary assets, such
+Compiler releases carry an archive for each platform the compiler's release
+workflow packages, with the libraries the compiler loads and Zig, for building
+Linux, Windows and macOS programs: **Linux x86_64**, **macOS** on Apple
+Silicon and Intel, and **Windows x86_64**. A release made before a platform
+was packaged has no archive for it. On such a release, and on other CLI host
+platforms such as Linux on AArch64, `zane` reports a missing compiler archive. A tag without binary assets, such
 as the original `v0.0`, cannot be installed this way.
 
 To test an unreleased compiler or use a host without a binary release, build
