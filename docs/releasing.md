@@ -1,7 +1,10 @@
 # Publishing a `zane` release
 
 `zane` versions are independent of compiler versions. A tag has two or three
-numeric components (`v0.0` or `v0.1.0`), without leading zeroes.
+numeric components (`v0.0` or `v0.1.0`), without leading zeroes. A missing
+patch counts as zero, so `v0.2` and `v0.2.0` are the same version to
+`zane self update`, which cannot move between them; publish only one of the
+two.
 
 ## Running the release
 
@@ -34,6 +37,8 @@ tag or assets.
 passed as its argument (`sh -s -- v0.0`) installs that version.
 `install.ps1` (Windows) verifies the binary's SHA-256, installs into
 `%LOCALAPPDATA%\Programs\Zane\bin`, and adds that folder to the user `Path`
-and the current terminal's; `-Version v0.0` chooses a version.
+and the current terminal's; `-Version v0.0` chooses a version and
+`-InstallDir <folder>` another directory, passed after the installer command
+the README shows (`& ([scriptblock]::Create(...)) -InstallDir D:\Tools\zane`).
 `zane self update` (`docs/design/cli.md` §4.2) replaces an installed binary
 the same way.

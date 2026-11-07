@@ -154,9 +154,9 @@ zane test
 ### Compilers and projects
 
 Each project pins its compiler in `zane.coda` (`zane-version`) and
-`zane-lock.coda`, and `zane` runs exactly that compiler for it. Compilers are
-installed side by side in `~/.zane/toolchains/`, so projects on different
-versions work next to each other; installing a newer compiler changes no
+`zane-lock.coda`, and `zane` runs the installed toolchain of that version for
+it. Compilers are installed side by side in `~/.zane/toolchains/`, so projects
+on different versions work next to each other; installing a newer compiler changes no
 project until you run `zane toolchain update` in it.
 
 To use a compiler you built yourself, point `zane` at it:
@@ -164,6 +164,14 @@ To use a compiler you built yourself, point `zane` at it:
 ```sh
 export ZANE_COMPILER=/absolute/path/to/zanec
 ```
+
+```powershell
+$env:ZANE_COMPILER = 'C:\path\to\zanec.exe'
+```
+
+`ZANE_COMPILER` comes before the pinned toolchain, and when that toolchain is
+not installed, `zane` falls back to a `zanec` on `PATH`. Neither is checked
+against the project's pin.
 
 ## Learning the language
 
