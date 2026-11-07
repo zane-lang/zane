@@ -238,7 +238,7 @@ module Zane::Commands
         package #{name};
 
         /// Every declaration is public unless its name starts with `_`.
-        @primitives$I64 double(n @primitives$I64) => @operators$add(n, n)
+        @primitives$I64 double(n @primitives$I64) => @operators$add(n, n);
 
         ZANE
     end
@@ -251,14 +251,14 @@ module Zane::Commands
 
         import #{name};
 
-        alias I64 = @primitives$I64
-        alias Bool = @primitives$Bool
-        alias Unit = @primitives$Unit
-        alias String = @primitives$String
+        alias I64 = @primitives$I64;
+        alias Bool = @primitives$Bool;
+        alias Unit = @primitives$Unit;
+        alias String = @primitives$String;
 
         Unit check(ok Bool) {
-        \tpassed String("ok\\n");
-        \tfailed String("failed\\n");
+        \tpassed String.escaped("ok\\n");
+        \tfailed String.escaped("failed\\n");
         \t@controlflow$branch(ok, {
         \t\t@program$console!print(passed);
         \t});
