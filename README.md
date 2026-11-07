@@ -57,7 +57,8 @@ Unit main() {
 
 A few things that stand out:
 
-- A declaration names its type, then the name: `x Int`, `p Point(…)`.
+- A variable is written name first, then its type: `x Int`, `p Point(…)`. A
+  function starts with what it returns: `Int steps(…)`.
 - `Int`, `Bool`, `if`, `else` and the `to` loop are ordinary code from the
   [`core`](https://github.com/zane-lang/core) package, written in Zane. The
   language itself has no `if` or `while` keyword.
