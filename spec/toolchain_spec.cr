@@ -131,6 +131,22 @@ private def toolchain_update(project : Path, *args, compiler : String? = nil) : 
 end
 
 describe Zane::Toolchain do
+  it "names the host as compiler release archives do" do
+    expected =
+      {% if flag?(:win32) %}
+        "windows-x86_64"
+      {% elsif flag?(:darwin) && flag?(:aarch64) %}
+        "macos-aarch64"
+      {% elsif flag?(:darwin) %}
+        "macos-x86_64"
+      {% elsif flag?(:aarch64) %}
+        "linux-aarch64"
+      {% else %}
+        "linux-x86_64"
+      {% end %}
+    Zane::Toolchain.host.should eq(expected)
+  end
+
   it "lists each installation step on a terminal and keeps the success message on stdout" do
     with_toolchains do |registry|
       registry.publish("v1.0")
