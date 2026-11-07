@@ -1,138 +1,128 @@
-# zane
+<!-- markdownlint-disable-next-line MD041 -- the logo floats before the title -->
+<img height="96" align="right" src="https://raw.githubusercontent.com/zane-lang/logos/main/zane/zane.svg" alt="Zane logo" />
 
-The command a Zane programmer runs: it creates projects, manages their
-dependencies, and builds and runs them with the compiler each project pins.
-What it does and why is in [`docs/design/cli.md`](docs/design/cli.md).
+# Zane
 
-## Installing
+Zane is a systems programming language. Its compiler keeps the intent you
+write down and turns strict rules into speed, so programs get deterministic
+memory management with no garbage collector and no lifetime annotations.
 
-Install the latest release on **Linux x86_64 or macOS Apple Silicon**:
+This repository holds **`zane`**, the command you use to work with Zane: it
+creates projects, fetches their dependencies, installs compilers, and builds,
+runs and tests programs.
+
+## Notice
+
+<notice>
+<!-- To be written by the maintainer: the experimental nature of the project,
+     how and why AI is used in it, the current lack of beginner documentation,
+     and anything else a newcomer should know first. -->
+</notice>
+
+## A taste of Zane
+
+```zane
+package hello;
+
+import core$;
+
+type Point = struct {
+	x Int;
+	y Int;
+}
+Point(x Int, y Int) => init{ x; y; }
+
+/// A method: `this` is the point it is called on.
+Int steps(this Point) => this.x + this.y;
+
+Unit main() {
+	console Console(@program$console);
+	console!print("Hello, Zane!");
+
+	p Point(Int(3), Int(4));
+	far Bool = if(Int(5) < p:steps()) {
+		console!print("far away");
+	}
+	far:else() {
+		console!print("close by");
+	}
+
+	i Int = Int(1);
+	i!to(Int(3)) {
+		console!print("tick");
+	}
+	return Unit();
+}
+```
+
+A few things that stand out:
+
+- A declaration names its type, then the name: `x Int`, `p Point(…)`.
+- `Int`, `Bool`, `if`, `else` and the `to` loop are ordinary code from the
+  [`core`](https://github.com/zane-lang/core) package, written in Zane. The
+  language itself has no `if` or `while` keyword.
+- A call says what it may do to its subject: `p:steps()` only reads `p`,
+  while `console!print(…)` and `i!to(…)` may change theirs.
+- The console is an object handed to you by the program
+  (`@program$console`), so code that has no access to it cannot print.
+
+## Install
+
+On **Linux x86_64** or **macOS on Apple Silicon**:
 
 ```sh
 curl -fsSL https://github.com/zane-lang/zane/releases/latest/download/install.sh | sh
 ```
 
-The installer verifies the binary's SHA-256 and writes `~/.local/bin/zane`.
-Add that directory to your shell's `PATH` if it is not there already:
+This puts `zane` in `~/.local/bin`. Add that directory to your `PATH` if it is
+not there yet (`export PATH="$HOME/.local/bin:$PATH"` in `~/.bashrc` or
+`~/.zshrc`).
 
-```sh
-export PATH="$HOME/.local/bin:$PATH"
-zane --version
-```
-
-Put the `export` in `~/.bashrc` or `~/.zshrc` to keep it for new terminals.
-Set `ZANE_INSTALL_DIR` to install elsewhere, or pass a tag to install a
-specific version:
-
-```sh
-curl -fsSL https://github.com/zane-lang/zane/releases/latest/download/install.sh | sh -s -- v0.0
-```
-
-On **Windows x86_64**, run this in PowerShell:
+On **Windows x86_64**, in PowerShell:
 
 ```powershell
 & ([scriptblock]::Create((Invoke-RestMethod https://github.com/zane-lang/zane/releases/latest/download/install.ps1)))
-zane --version
 ```
 
-It verifies the binary's SHA-256, installs into
-`%LOCALAPPDATA%\Programs\Zane\bin`, and adds that folder to your user `Path`
-and the current terminal's `Path`. To choose a version,
-append `-Version v0.0` to the installer command.
+Both installers check the download's SHA-256 and need no administrator
+access; how to pick another directory or version is in
+[`docs/releasing.md`](docs/releasing.md#what-the-installers-do). You can also
+take the binaries from [Releases](https://github.com/zane-lang/zane/releases)
+and read the scripts before running them.
 
-Both commands work after the first release is published. You can also download
-the binaries and installers from [Releases](https://github.com/zane-lang/zane/releases)
-and inspect the scripts before running them. No administrator access is needed.
-
-### Updating zane
-
-Replace the installed `zane` with the latest release, or with the version named:
-
-```sh
-zane self update
-zane self update v0.12
-```
-
-It verifies the new binary's SHA-256 and checks that it runs before replacing
-the old one, which stays in place if anything fails. It writes only in the
-directory that holds `zane`, so run it as the user that installed it. A `zane` that a package
-manager installed is updated with that package manager instead. Updating the
-CLI changes no project; the compiler is updated separately, as below.
-
-### The compiler
-
-Install the latest published compiler toolchain, or choose a version:
+Then install a compiler:
 
 ```sh
 zane toolchain install
-zane toolchain install v3.0
+zane --version
 ```
 
-The version is a compiler tag, independent of the CLI's own version. Omit it
-to use GitHub's latest published compiler release, even if an older toolchain
-is already installed. Installation works outside a project and verifies the
-archive's SHA-256 and its compiler commit before making it available.
-On a terminal, installation reports each step on stderr as it happens: finished
-steps stay listed with how long they took, and the download, checksum and
-extraction show a progress bar with the amount done, the rate and the time
-left. Every other command reports its slow steps the same way, such as
-fetching packages and compiling ([`docs/design/cli.md`](docs/design/cli.md)
-§1.1). A non-empty `NO_COLOR` turns its colours off; redirected output and
-terminals with `TERM=dumb` keep the usual plain output.
+Compiler releases are packaged for Linux x86_64, macOS (Apple Silicon and
+Intel) and Windows x86_64. Each one brings everything it needs to build
+programs for all three systems, so you install no C compiler or LLVM yourself.
 
-Toolchains live side by side in `~/.zane/toolchains/<version>/`, or under
-`ZANE_HOME`. Projects use the version their `zane-version` field pins;
-installing a newer compiler does not update that field. `zane init` uses the
-newest installed compiler, and `zane check`, `build`, `run` and `test` find it
-automatically. No extra `PATH` setup is needed for the compiler.
-
-To move a project to another compiler, run `zane toolchain update` in it,
-with a version to choose one rather than the latest:
-
-```sh
-zane toolchain update
-zane toolchain update v3.0
-```
-
-It installs that compiler when it is missing, showing the same steps, checks that every dependency's
-`zane-version` allows it, and then writes the version into `zane.coda` and its
-commit into `zane-lock.coda`. Nothing is compiled until the next `zane build`,
-`run`, `test` or `fetch`, so a dependency the new compiler cannot build as
-pinned can be moved with `zane update` first.
-
-Compiler releases carry an archive for each platform the compiler's release
-workflow packages, with the libraries the compiler loads and Zig, for building
-Linux, Windows and macOS programs: **Linux x86_64**, **macOS** on Apple
-Silicon and Intel, and **Windows x86_64**. A release made before a platform
-was packaged has no archive for it. On such a release, and on other CLI host
-platforms such as Linux on AArch64, `zane` reports a missing compiler archive. A tag without binary assets, such
-as the original `v0.0`, cannot be installed this way.
-
-To test an unreleased compiler or use a host without a binary release, build
-the [compiler](https://github.com/zane-lang/compiler), then put `zanec` on
-your `PATH`, or point the CLI directly at it:
-
-```sh
-export ZANE_COMPILER=/absolute/path/to/zanec
-```
-
-```powershell
-$env:ZANE_COMPILER = 'C:\path\to\zanec.exe'
-```
-
-This also lets you test an unreleased compiler. Then create and check a project:
+## Your first project
 
 ```sh
 zane init hello --yes
 cd hello
-zane check
+zane run
 ```
 
-A project keeps library packages in `lib/`, programs in `bin/` and test
-packages in `test/`. `zane init` starts a program in `bin/<name>/`, which
-`zane run` builds and runs. `zane init --lib` starts a library package in
-`lib/<name>/` and a test package for it in `test/<name>/`, which imports it
-the way any other project would, and `zane test` builds and runs it:
+`zane init` creates a project that pins the newest installed compiler, with a
+program in `bin/hello/main.zn`; `zane run` builds it and prints
+`hello world`.
+
+To write code like the example above, add the `core` package and replace
+`bin/hello/main.zn` with the example (keeping `package hello;` as its first
+line):
+
+```sh
+zane add https://github.com/zane-lang/core --from-source
+zane run
+```
+
+A **library** project keeps its code in `lib/` and its tests in `test/`:
 
 ```sh
 zane init geometry --lib --name math --yes
@@ -140,43 +130,79 @@ cd geometry
 zane test
 ```
 
-`init` pins an installed compiler toolchain or a published compiler tag.
-`ZANE_COMPILER` overrides the compiler
-executable used to check and build it.
+## Everyday commands
 
-## Building
+| Command | What it does |
+|---|---|
+| `zane init [dir]` | Create a project (`--lib` for a library) |
+| `zane check` | Type-check the project without building it |
+| `zane build [program]` | Build programs from `bin/` into `out/` |
+| `zane run [program]` | Build a program and run it |
+| `zane test [test]` | Build and run the test packages in `test/` |
+| `zane add <url> [tag]` | Depend on a library |
+| `zane update [key [tag]]` | Move dependencies to a newer tag |
+| `zane remove <key>` | Drop a dependency |
+| `zane tree` | Show what the project depends on |
+| `zane toolchain install [version]` | Install a compiler |
+| `zane toolchain update [version]` | Move the project to another compiler |
+| `zane self update [version]` | Update `zane` itself |
 
-The toolchain comes from [devbox](https://www.jetify.com/devbox):
+`zane help` lists every command. What each one does, and why, is in
+[`docs/design/cli.md`](docs/design/cli.md).
+
+### Compilers and projects
+
+Each project pins its compiler in `zane.coda` (`zane-version`) and
+`zane-lock.coda`, and `zane` runs exactly that compiler for it. Compilers are
+installed side by side in `~/.zane/toolchains/`, so projects on different
+versions work next to each other; installing a newer compiler changes no
+project until you run `zane toolchain update` in it.
+
+To use a compiler you built yourself, point `zane` at it:
 
 ```sh
-git submodule update --init
-devbox run -- just test      # the specs
-devbox run -- just build     # build/zane
-devbox run -- just release   # the optimised binary that is published
+export ZANE_COMPILER=/absolute/path/to/zanec
 ```
 
-`just` with no arguments lists every recipe.
+## Learning the language
 
-## Publishing a CLI release
+There is no tutorial yet. The language is described in the
+[specification](https://github.com/zane-lang/spec). A good order to read it
+in:
 
-After the release workflow is on `main`, open **Actions → Release → Run
-workflow**, select `main`, and enter a tag such as `v0.0` for the first release.
-CLI versions are independent of compiler versions. Tags may use two or three
-numeric components (`v0.0` or `v0.1.0`), without leading zeroes.
+1. [`foundations.md`](https://github.com/zane-lang/spec/blob/main/spec/foundations.md): the ideas the rest of the language rests on
+2. [`syntax.md`](https://github.com/zane-lang/spec/blob/main/spec/syntax.md): what each construct looks like
+3. [`types.md`](https://github.com/zane-lang/spec/blob/main/spec/types.md) and [`functions.md`](https://github.com/zane-lang/spec/blob/main/spec/functions.md): types, constructors and methods
+4. [`memory.md`](https://github.com/zane-lang/spec/blob/main/spec/memory.md) and [`effects.md`](https://github.com/zane-lang/spec/blob/main/spec/effects.md): ownership, references, and what a call may change
+5. [`packages.md`](https://github.com/zane-lang/spec/blob/main/spec/packages.md): how a project is laid out
 
-The workflow tests and builds Linux x86_64, macOS arm64 and Windows x86_64
-from the exact commit selected when it starts. It embeds the tag in
-`zane --version`, creates the Git tag, uploads the three binaries, both
-installers and `SHA256SUMS` to a draft release, then publishes it as latest.
-No source version edit, local tag, manual push, or extra token is required.
-Only the publishing job has write access.
+Every spec document has a matching *design story* in
+[`stories/`](https://github.com/zane-lang/spec/tree/main/stories) that tells
+why the language looks the way it does. The
+[`core` tests](https://github.com/zane-lang/core/tree/main/test/core) are the
+largest body of working Zane code.
 
-An existing tag is reused only when it points to the exact source commit and
-has no release. If tag creation succeeds but release creation fails, use
-**Re-run failed jobs** on the original Actions run: it keeps the original
-commit and reuses the successful builds. A tag pointing elsewhere, or a draft
-or published release for that tag, is refused.
+## The other repositories
 
-If uploading fails, inspect and finish the draft, or remove the draft before
-retrying the failed job. Keep its tag; do not replace a published version's
-tag or assets.
+| Repository | What it is |
+|---|---|
+| [`compiler`](https://github.com/zane-lang/compiler) | `zanec`, the compiler that `zane` runs |
+| [`spec`](https://github.com/zane-lang/spec) | The language specification and its design stories |
+| [`core`](https://github.com/zane-lang/core) | The `core` and `math` packages: numbers, text, lists, control flow |
+| [`zane-nvim`](https://github.com/zane-lang/zane-nvim) | Neovim support |
+| [`coda`](https://github.com/zane-lang/coda) | The configuration format of `zane.coda` and other Zane files |
+
+## Building `zane` from source
+
+`zane` is written in [Crystal](https://crystal-lang.org/). The toolchain comes
+from [devbox](https://www.jetify.com/devbox):
+
+```sh
+git clone --recurse-submodules https://github.com/zane-lang/zane
+cd zane
+devbox run -- just build     # build/zane
+devbox run -- just test      # the specs
+```
+
+`just` with no arguments lists every recipe. How a release is published is in
+[`docs/releasing.md`](docs/releasing.md).
