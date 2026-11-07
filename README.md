@@ -11,13 +11,7 @@ This repository holds **`zane`**, the command you use to work with Zane: it
 creates projects, fetches their dependencies, installs compilers, and builds,
 runs and tests programs.
 
-## Notice
-
-<notice>
-<!-- To be written by the maintainer: the experimental nature of the project,
-     how and why AI is used in it, the current lack of beginner documentation,
-     and anything else a newcomer should know first. -->
-</notice>
+> [!NOTE] Maintainer here: Zane is still very young and in its experimental phase. This means stuff may break a lot while it's major version is zero. I am also using AI heavily to iterate quickly and test out different approaches to problems; again, because Zane is still experimental. However, this doesn't mean I'm not involved. Zane started with the idea of creating a language that doesn't have GC pauses, doesn't require manual management and doesn't need lifetime annotations (these goals mainly come from audio dsp). In december 2025 I started thinking more seriously about bringing it to life. So that's when I started with the language design. I didn't know much at the time, but as I researched more and more, I gathered a lot of knowledge which ultimately enabled me to make a great language. Once I too many, I couldn't really spend a lot of time writing nice documents about them. So I decided to use AI to record my ideas in the [spec repo](https://github.com/zane-lang/spec). This also meant that I could now keep the history of my decisions (which I find particularly important) as I didn't need to write them myself. I decided to spend extra time on the spec, as I wanted to have a well thought out language. I spent roughly 3/4 year designing the language, which shows how much thought went into it. The compiler was then made with substantial AI assistance too, because it meant that I had more flexibility in changing things up and I could explore different paths to the destination. Importantly, without AI I wouldn't have had the capacity to make a compiler in the first place, unless I decided to stick with an idea and never change something up, which directly goes against my philosophy.
 
 ## A taste of Zane
 
