@@ -217,3 +217,9 @@ devbox run -- just test      # the specs
 
 `just` with no arguments lists every recipe. How a release is published is in
 [`docs/releasing.md`](docs/releasing.md).
+
+## License
+
+`zane` is under the MIT license; see [`LICENSE`](LICENSE). The compiler it
+installs has its own license, in
+[`zane-lang/compiler`](https://github.com/zane-lang/compiler).
