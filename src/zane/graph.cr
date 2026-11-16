@@ -328,8 +328,23 @@ module Zane
             @layout.programs.map { |p| {p.name, "bin/#{p.name}/"} }
       distinct(own, direct, "the project reaches")
       distinct(own + publics(direct), test_direct, "the project's tests reach") if @test
+      apart(@layout, "", @test ? direct + test_direct : direct, "the project reaches")
       @packages.each do |p|
         distinct(p.layout.top_libs.map { |l| {l.name, "lib/#{l.name}/ of #{p.url}"} }, dependencies(p), "#{p.url} reaches")
+        apart(p.layout, " of #{p.url}", dependencies(p), "#{p.url} reaches")
+      end
+    end
+
+    # A subpackage's name stays apart from the names its project reaches
+    # its dependencies' packages by, since the package that holds it
+    # imports both (dependencies.md §8). Two subpackages may share a name.
+    private def apart(layout : Layout, of : String, edges : Array(Edge), whose : String) : Nil
+      names = publics(edges).to_h
+      layout.libs.reject(&.top?).each do |l|
+        next unless other = names[l.name]?
+        raise UserError.new("#{whose} two packages named `#{l.name}`: the subpackage lib/#{l.path.tr(".", "/")}/#{of} and #{other}; " \
+                            "a subpackage's name stays apart from the dependencies' packages, so rename its directory, " \
+                            "or give the dependency's package another name with `zane rename`")
       end
     end
 

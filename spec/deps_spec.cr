@@ -1406,3 +1406,36 @@ describe "zane rename with a dependency keyed off" do
     end
   end
 end
+
+describe "subpackage names" do
+  it "keeps a subpackage's name apart from the dependencies' packages, renamed or not" do
+    with_registry do |registry, project|
+      registry.publish("opengl", "v1.0")
+      Dir.mkdir_p(project / "lib" / "gui" / "opengl")
+      File.write(project / "lib" / "gui" / "gui.zn", "package gui;\n")
+      File.write(project / "lib" / "gui" / "opengl" / "gl.zn", "package opengl;\n")
+      expect_raises(Zane::UserError, "the project reaches two packages named `opengl`: the subpackage lib/gui/opengl/ and `opengl` of the dependency `opengl`") do
+        zane(["add", registry.url("opengl")], project)
+      end
+      zane(["add", registry.url("opengl"), "--rename", "opengl=gl"], project)[0].should eq 0
+      expect_raises(Zane::UserError, "the subpackage lib/gui/opengl/ and `opengl` of the dependency `opengl` (https://example.com/opengl);") do
+        zane(["rename", "opengl", "opengl", "opengl"], project)
+      end
+      registry.publish("glx", "v1.0")
+      expect_raises(Zane::UserError, "the subpackage lib/gui/opengl/ and `glx` of the dependency `glx` (https://example.com/glx), renamed `opengl`") do
+        zane(["add", registry.url("glx"), "--rename", "glx=opengl"], project)
+      end
+    end
+  end
+
+  it "lets two subpackages of different parents share a name" do
+    with_registry do |_, project|
+      {"gui", "render"}.each do |top|
+        Dir.mkdir_p(project / "lib" / top / "opengl")
+        File.write(project / "lib" / top / "#{top}.zn", "package #{top};\n")
+        File.write(project / "lib" / top / "opengl" / "gl.zn", "package opengl;\n")
+      end
+      zane(["check"], project)[0].should eq 0
+    end
+  end
+end
