@@ -400,11 +400,20 @@ module Zane
     end
 
     # Each public library package of *edges*' packages, by the key it is
-    # imported by, its name, and what the compiler knows it by.
+    # imported by, its name, and what the compiler knows it by. A remapped
+    # edge keeps the packages of the version it pins, each found in the
+    # version chosen in its place.
     def public_keys(edges : Array(Edge), remapped : Bool = true) : Array({String, String})
       edges.flat_map do |e|
         target = remapped ? resolved(e.package) : e.package
-        e.publics(target).map { |name, l| {name, target.id(l)} }
+        e.publics.map do |name, l|
+          found = target.layout.public_libs.find { |t| t.name == l.name }
+          unless found
+            raise UserError.new("#{e.package.url} #{target.tag}, linked in place of #{e.package.tag}, has no public package `#{l.name}`, " \
+                                "which #{e.package.tag} has; `zane unremap #{e.package.url}` links each version as it is")
+          end
+          {name, target.id(found)}
+        end
       end
     end
 

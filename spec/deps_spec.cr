@@ -1204,6 +1204,39 @@ describe Zane::Graph do
   end
 end
 
+describe "remapping a renamed dependency" do
+  it "imports the packages of the version pinned, found in the version chosen in its place" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0.0")
+      registry.publish("math", "v1.2.0", also: ["extra"])
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0.0"}], renames: [{"math", "math", "extra"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["add", registry.url("math"), "v1.2.0", "--rename", "extra=_"], project)[0].should eq 0
+      zane(["remap", registry.url("math")], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+
+      shapes = registry.id("shapes", "v1.0")
+      new = registry.stamp("math", "v1.2.0")
+      imports = File.read_lines(log).last.split(" --import ").select(&.starts_with?("#{shapes}:"))
+      imports.should eq ["#{shapes}:extra=#{new}math"]
+    end
+  end
+
+  it "refuses a version chosen in place of one whose package it lacks" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0.0", also: ["extra"])
+      registry.publish("math", "v1.2.0")
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0.0"}])
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["add", registry.url("math"), "v1.2.0"], project)[0].should eq 0
+      zane(["remap", registry.url("math")], project)[0].should eq 0
+      expect_raises(Zane::UserError, "https://example.com/math v1.2.0, linked in place of v1.0.0, has no public package `extra`") do
+        zane(["build"], project)
+      end
+    end
+  end
+end
+
 describe "remapping more than one version" do
   it "remaps each object once per displaced version, each pass into a file of its own" do
     with_registry do |registry, project, log|
