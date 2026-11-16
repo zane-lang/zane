@@ -238,16 +238,17 @@ These and `zane toolchain update` (§4) are the only commands that write
 
 | Command | Does |
 |---|---|
-| `zane add <url> [tag] [--as key] [--from-source] [--test]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Resolves the graph with the library in it before writing either file, so a library that cannot be resolved is never recorded. Refuses a project with no public library package. Refuses, too, a graph in which a package linked as a release has no `zane-artifacts.coda`, since no build could link it: the library itself, unless `--from-source` is given, or one of its own dependencies, which are always linked as releases. A release whose artifact manifest lists no archive for the host is recorded with a warning, since the project may build for the targets it lists. Prints the `import` lines for its public library packages. With `--test`, writes the row into `test-deps` instead of `deps`. With `--from-source`, for a library the project already depends on at that URL, in the block `--test` names, sets its `from` to `source` at the version it pins; `zane dev off` sets it back to `release`. A dependency compiled from a local project is left as it is. |
-| `zane remove <key>` | Removes the key, from `deps` or `test-deps`, from both files, and warns about each line of the project's packages that still imports one of its packages. |
+| `zane add <url> [tag] [--as key] [--from-source] [--test] [--rename package=name …]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Resolves the graph with the library in it before writing either file, so a library that cannot be resolved is never recorded. Refuses a project with no public library package. Refuses, too, a graph in which a package linked as a release has no `zane-artifacts.coda`, since no build could link it: the library itself, unless `--from-source` is given, or one of its own dependencies, which are always linked as releases. A release whose artifact manifest lists no archive for the host is recorded with a warning, since the project may build for the targets it lists. Prints the `import` lines for its public library packages. With `--test`, writes the row into `test-deps` instead of `deps`. With `--from-source`, for a library the project already depends on at that URL, in the block `--test` names, sets its `from` to `source` at the version it pins; `zane dev off` sets it back to `release`. A dependency compiled from a local project is left as it is. Each `--rename` writes a `renames` row for the new dependency, held to the rules `zane rename` checks, so a library whose package's name clashes with one the project already imports can be added under another name, or with that package dropped. |
+| `zane remove <key>` | Removes the key, from `deps` or `test-deps`, from both files, with its `renames` rows, and warns about each line of the project's packages that still imports one of its packages. |
 | `zane update [key [tag]] [--accept-tag-move]` | Moves one key, or every key, to the tag named, or else the newest, and pins its commit. A tag that now points to another commit than the lock file pins has moved, and is refused with a security error without the flag. Refuses, as `add` does, a release it would move to a tag that publishes no prebuilt objects. |
 | `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. `dev off` refuses, as `add` does, a release that publishes no prebuilt objects. |
 | `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
+| `zane rename <key> <package> <name>` / `zane rename off <key> <package>` | Writes the `renames` row that has the project import the key's package by the name, replacing the package's row if it has one, or drops the package when the name is `_`; `rename off` removes the row ([`dependencies.md` §2.1, §2.3, §8](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#8-importing-a-dependencys-packages)). The name is a package name that is neither `test` nor the package's own; the package must be a public library package of the version the key pins, and the rows must not drop every one. The changed graph is resolved before the file is written, so a name that would clash with another package the project imports is refused, and so is a `rename off` that would bring one back. `off` is the first argument only while the project has no dependency of that key. |
 | `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. |
-| `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, URL and where its code comes from. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
+| `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, public library packages, URL and where its code comes from; a package its dependent's `renames` rows rename is shown as `math as twoMath`, and one they drop as `extra dropped`. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
 
-`update` and `dev` apply to a `test-deps` key as to a `deps` key. `add`, `update`
-and `dev` resolve the changed graph, `test-deps` included, before writing either
+`update`, `dev` and `rename` apply to a `test-deps` key as to a `deps` key. `add`, `update`,
+`dev` and `rename` resolve the changed graph, `test-deps` included, before writing either
 file: each version's source is checked out to read its manifest, and the graph
 is held to the rules of §3.1 that need no objects, its packages' `zane-version`
 included, so a change that leaves it unable to resolve is refused and nothing is
@@ -329,7 +330,11 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   Each version is a package of its own, so versions of one package, and
   packages of one name, are linked side by side
   ([§11](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#11-multiple-version-coexistence)),
-  and a key need not be its package's name.
+  and a key need not be its package's name. The keys a package of a
+  project imports by are its dependencies' packages' names, or the names
+  the project's `renames` rows give them, and a dropped package has none
+  ([§8](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#8-importing-a-dependencys-packages));
+  each fetched project's own rows give its own packages' keys.
 
 Each part of a cache entry is made beside where it goes and renamed into place
 once whole, so an interrupted fetch leaves nothing that looks ready.
@@ -486,7 +491,7 @@ subpackage it tests
 1. **Local projects.** `init`, `check`, `build`, `run`, `clean`, and the
    `zanec` flags of §5. No dependencies, so a project uses the storage
    primitives (`@primitives$`) directly, as the compiler's test fixtures do.
-2. **Dependencies.** `add`, `remove`, `update`, `dev`, `remap`, `fetch`,
+2. **Dependencies.** `add`, `remove`, `update`, `dev`, `remap`, `rename`, `fetch`,
    `tree`, and the cache (§3, §3.1). Built.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
 4. **Toolchains.** `toolchain install [tag]` and `toolchain update [tag]`,

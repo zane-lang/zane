@@ -164,9 +164,12 @@ module Zane::Commands
     @key : String? = nil
     @from_source = false
     @test = false
+    # Each `--rename PACKAGE=NAME`, a `renames` row written with the
+    # dependency (spec dependencies.md §2.3).
+    @renames = [] of {String, String}
 
     def usage : String
-      "usage: zane add <url> [tag] [--as KEY] [--from-source] [--test]"
+      "usage: zane add <url> [tag] [--as KEY] [--from-source] [--test] [--rename PACKAGE=NAME ...]"
     end
 
     def arity : Range(Int32, Int32)
@@ -177,6 +180,11 @@ module Zane::Commands
       p.on("--as KEY", "The key to import the library by, instead of the last part of its URL") { |v| @key = v }
       p.on("--from-source", "Compile the library here rather than link its prebuilt objects") { @from_source = true }
       p.on("--test", "Record it in `test-deps`, for the test packages alone") { @test = true }
+      p.on("--rename PACKAGE=NAME", "Import its package PACKAGE by NAME in the project, or drop it when NAME is _") do |v|
+        package, eq, name = v.partition('=')
+        raise UserError.new("--rename takes PACKAGE=NAME, such as math=otherMath\n#{usage}") if eq.empty?
+        @renames << {package, name}
+      end
     end
 
     def run : Int32
@@ -190,13 +198,30 @@ module Zane::Commands
       tag, commit = pin(tags, url, @args[1]? || newest(tags, url))
 
       dep = Dependency.new(key, tag, @from_source ? "source" : "release", @test)
+      manifest = ws.manifest.with_dependency(dep, Resolution.new(url.url, commit))
+      renames = @renames.map { |package, name| Zane::Rename.new(key, package, name) }
+      renames.each_with_index do |r, i|
+        if error = Manifest.rename_error(r, manifest.all_deps)
+          raise UserError.new(error)
+        end
+        if renames[0, i].any? { |o| o.package == r.package }
+          raise UserError.new("--rename names the package `#{r.package}` twice")
+        end
+      end
+      manifest = manifest.with_renames(manifest.renames + renames)
       # The whole graph is resolved before anything is written, so a library
       # that cannot be resolved is never recorded.
-      graph = resolve(ws.manifest.with_dependency(dep, Resolution.new(url.url, commit)))
+      graph = resolve(manifest)
       edge = (@test ? graph.test_direct : graph.direct).find! { |e| e.key == key }
       warned = check_releases(graph).includes?(key)
       ProjectFiles.change(ws.root,
-        ->(doc : Coda::Doc) { ProjectFiles.deps(doc, @test)[key] = Coda::Row.new.insert("version", tag).insert("from", dep.from); nil },
+        ->(doc : Coda::Doc) {
+          ProjectFiles.deps(doc, @test)[key] = Coda::Row.new.insert("version", tag).insert("from", dep.from)
+          renames.each do |r|
+            ProjectFiles.renames(doc) << Coda::Row.new.insert("dependency", key).insert("package", r.package).insert("name", r.name)
+          end
+          nil
+        },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc)[key] = Coda::Row.new.insert("url", url.url).insert("commit", commit); nil })
 
       how = if @from_source
@@ -207,7 +232,7 @@ module Zane::Commands
               "linked from its prebuilt objects"
             end
       @output.puts "Added #{key} #{tag} (#{url}, commit #{commit[0, 12]}), #{how}#{@test ? ", for the tests" : ""}."
-      imports = edge.package.layout.public_libs.map { |l| "import #{l.name}" }
+      imports = edge.publics.map { |name, _| "import #{name}" }
       @output.puts "Import its packages#{@test ? " in test/" : ""} with: #{imports.join(", ")}"
       0
     end
@@ -221,6 +246,9 @@ module Zane::Commands
       key = @key || url.basename
       return nil unless ws.manifest.dependency?(key)
       dep = dependency(key)
+      unless @renames.empty?
+        raise UserError.new("`#{key}` is already a dependency; `zane rename` renames its packages")
+      end
       locked = ws.manifest.resolutions[key]
       unless PackageUrl.parse(locked.url).normalized == url.normalized
         raise UserError.new("the project already depends on `#{key}`, at #{locked.url}; choose another key with --as")
@@ -277,9 +305,13 @@ module Zane::Commands
       ws = workspace
       dep = dependency(@args[0])
       key = dep.key
-      names = package_names(dep) || [] of String
+      names = (package_names(dep) || [] of String).compact_map { |n| ws.manifest.import_name(key, n) }
       ProjectFiles.change(ws.root,
-        ->(doc : Coda::Doc) { ProjectFiles.deps(doc, dep.test).delete(key); nil },
+        ->(doc : Coda::Doc) {
+          ProjectFiles.deps(doc, dep.test).delete(key)
+          ProjectFiles.delete_renames(doc) { |r| r["dependency"] == key }
+          nil
+        },
         ->(doc : Coda::Doc) { ProjectFiles.resolutions(doc).delete(key); nil })
       @output.puts "Removed #{key}."
       ws.importers(names).each do |file, line|
@@ -466,6 +498,69 @@ module Zane::Commands
     end
   end
 
+  # `zane rename <key> <package> <name>` and `zane rename off <key>
+  # <package>` (§3): gives a dependency's package another name in the
+  # project, or drops it when the name is `_`, or imports it by its own name
+  # again (spec dependencies.md §2.1, §2.3, §8).
+  class Rename < EditCommand
+    def usage : String
+      "usage: zane rename <key> <package> <name> | zane rename off <key> <package>"
+    end
+
+    def arity : Range(Int32, Int32)
+      3..3
+    end
+
+    def run : Int32
+      ws = workspace
+      manifest = ws.manifest
+      off = @args[0] == "off" && manifest.dependency?("off").nil?
+      key, package = off ? {@args[1], @args[2]} : {@args[0], @args[1]}
+      dependency(key)
+      current = manifest.renames.find { |r| r.dependency == key && r.package == package }
+      others = manifest.renames.reject { |r| r.dependency == key && r.package == package }
+      if off
+        unless current
+          @output.puts "`#{package}` of #{key} is not renamed; nothing changed."
+          return 0
+        end
+        renames = others
+      else
+        rename = Zane::Rename.new(key, package, @args[2])
+        if error = Manifest.rename_error(rename, manifest.all_deps)
+          raise UserError.new(error)
+        end
+        if current == rename
+          @output.puts "`#{package}` of #{key} is already #{described(rename)}; nothing changed."
+          return 0
+        end
+        renames = others + [rename]
+      end
+
+      # The rows are checked against the dependency's checkout, and the names
+      # against everything else the project imports, before either is written.
+      resolve(manifest.with_renames(renames))
+      name = rename.try(&.name)
+      ProjectFiles.change(ws.root, ->(doc : Coda::Doc) {
+        ProjectFiles.delete_renames(doc) { |r| r["dependency"] == key && r["package"] == package }
+        if name
+          ProjectFiles.renames(doc) << Coda::Row.new.insert("dependency", key).insert("package", package).insert("name", name)
+        end
+        nil
+      })
+      if rename
+        @output.puts "`#{package}` of #{key} is now #{described(rename)}."
+      else
+        @output.puts "`#{package}` of #{key} is imported by its own name again."
+      end
+      0
+    end
+
+    private def described(rename : Zane::Rename) : String
+      rename.drop? ? "dropped" : "imported as `#{rename.name}`"
+    end
+  end
+
   # `zane fetch [--target T ...]` (§3): everything a build needs before it
   # compiles, for each target, so that builds can then run offline.
   class Fetch < ProjectCommand
@@ -539,21 +634,24 @@ module Zane::Commands
         notes << "remapped onto #{resolved.tag}" if chosen
         notes << "see above" if again
         note = notes.empty? ? "" : " (#{notes.join(", ")})"
-        @output.puts "#{indent}#{last ? "└── " : "├── "}#{line(edge.key, package)}#{note}"
+        @output.puts "#{indent}#{last ? "└── " : "├── "}#{line(edge, package)}#{note}"
         next if again
         shown << resolved.node
         print(graph, graph.dependencies(resolved), indent + (last ? "    " : "│   "), shown)
       end
     end
 
-    private def line(key : String, package : Graph::Package) : String
+    private def line(edge : Graph::Edge, package : Graph::Package) : String
       from = case package.from
              in .release? then "prebuilt"
              in .source?  then "from source"
              in .path?    then "from #{package.manifest.root}"
              end
-      names = package.layout.public_libs.map(&.name).join(", ")
-      "#{key} #{package.tag} (#{names}), #{package.url}, #{from}"
+      names = package.layout.public_libs.map do |l|
+        name = edge.name(l.name)
+        name.nil? ? "#{l.name} dropped" : name == l.name ? name : "#{l.name} as #{name}"
+      end
+      "#{edge.key} #{package.tag} (#{names.join(", ")}), #{package.url}, #{from}"
     end
   end
 end

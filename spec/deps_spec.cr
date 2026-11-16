@@ -63,7 +63,8 @@ private class Registry
   # published before), and returns the tag's commit.
   def publish(name : String, tag : String, deps = [] of {String, String}, program = false,
               archive : Bytes? = nil, artifacts = true, package_name = name, pattern = "v*.+.++",
-              zane_version = "v0.1", target = Zane::Target::HOST) : String
+              zane_version = "v0.1", target = Zane::Target::HOST, also = [] of String,
+              renames = [] of {String, String, String}) : String
     repo = @dir / name
     unless Dir.exists?(repo)
       Dir.mkdir_p(repo)
@@ -75,6 +76,11 @@ private class Registry
     dir = program ? repo / "bin" / package_name : repo / "lib" / package_name
     Dir.mkdir_p(dir)
     File.write(dir / "#{name}.zn", "package #{package_name};\n")
+    also.each do |extra|
+      Dir.mkdir_p(repo / "lib" / extra)
+      File.write(repo / "lib" / extra / "#{extra}.zn", "package #{extra};\n")
+    end
+    renamed = renames.empty? ? "" : "\nrenames [\n    dependency package name\n#{renames.map { |d, p, n| "    #{d} #{p} #{n}\n" }.join}]\n"
     File.write(repo / "zane.coda", <<-CODA)
       zane-version #{zane_version}
       version-pattern #{pattern}
@@ -82,6 +88,7 @@ private class Registry
       deps [
           key version from
       #{deps.map { |d, t| "    #{d} #{t} release\n" }.join}]
+      #{renamed}
       CODA
     rows = deps.map { |d, t| "    #{d} #{url(d)} #{git(@dir / d, "rev-parse", "#{t}^{commit}")}\n" }.join
     File.write(repo / "zane-lock.coda", <<-CODA)
@@ -156,6 +163,7 @@ private def zane(args : Array(String), dir : Path, output : IO = IO::Memory.new,
            when "update"  then Zane::Commands::Update.new(rest, output, error, dir).run
            when "dev"     then Zane::Commands::Dev.new(rest, output, error, dir).run
            when "remap"   then Zane::Commands::Remap.new(true, rest, output, error, dir).run
+           when "rename"  then Zane::Commands::Rename.new(rest, output, error, dir).run
            when "unremap" then Zane::Commands::Remap.new(false, rest, output, error, dir).run
            when "tree"    then Zane::Commands::Tree.new(rest, output, error, dir).run
            when "cache"   then Zane::Commands::Cache.new(rest, output, error).run
@@ -1224,6 +1232,115 @@ describe "remapping more than one version" do
         │       └── util v1.0 (util), https://example.com/util, prebuilt
         TEXT
       tree.should contain "└── math v1.2.0 (math), https://example.com/math, prebuilt (see above)"
+    end
+  end
+end
+
+private def rename_rows(project : Path) : Array(String)
+  text = File.read(project / "zane.coda")
+  match = text.match(/^renames \[\n(.*?)^\]/m)
+  match ? match[1].lines.map(&.split.join(" ")) : [] of String
+end
+
+describe "renames" do
+  it "lets a project use two dependencies that both publish a package of one name" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      registry.publish("math-two", "v1.0", package_name: "math")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      expect_raises(Zane::UserError, "`zane rename`, or `zane add --rename`") do
+        zane(["add", registry.url("math-two"), "--as", "two"], project)
+      end
+      status, output, _ = zane(["add", registry.url("math-two"), "--as", "two", "--rename", "math=twoMath"], project)
+      status.should eq 0
+      output.should contain "Import its packages with: import twoMath"
+      rename_rows(project).should eq ["dependency package name", "two math twoMath"]
+
+      math, two = registry.id("math", "v1.0"), registry.stamp("math-two", "v1.0") + "math"
+      FileUtils.rm_f(log)
+      zane(["check"], project)[0].should eq 0
+      app = File.read_lines(log).find! { |l| l.includes?("--package app=") }
+      app.should contain "--import app:math=#{math}"
+      app.should contain "--import app:twoMath=#{two}"
+      app.should_not contain "app:math=#{two}"
+
+      zane(["tree"], project)[1].should contain "two v1.0 (math as twoMath), https://example.com/math-two"
+
+      expect_raises(Zane::UserError, "two packages named `math`") do
+        zane(["rename", "off", "two", "math"], project)
+      end
+      expect_raises(Zane::UserError, "drop every package of `two`") do
+        zane(["rename", "two", "math", "_"], project)
+      end
+      zane(["rename", "two", "math", "twoMath"], project)[1].should contain "already imported as `twoMath`; nothing changed"
+      zane(["rename", "two", "math", "second"], project).should eq({0, "`math` of two is now imported as `second`.\n", ""})
+      rename_rows(project).should eq ["dependency package name", "two math second"]
+
+      zane(["remove", "two"], project)[0].should eq 0
+      rename_rows(project).should be_empty
+      File.read(project / "zane.coda").should_not contain "renames"
+    end
+  end
+
+  it "drops a package, which no package of the project then imports" do
+    with_registry do |registry, project, log|
+      registry.publish("pair", "v1.0", also: ["extra"])
+      zane(["add", registry.url("pair"), "--rename", "extra=_"], project)[1].should contain "import pair"
+      FileUtils.rm_f(log)
+      zane(["check"], project)[0].should eq 0
+      extra = registry.stamp("pair", "v1.0") + "extra"
+      lines = File.read_lines(log)
+      lines.join("\n").should contain "--package #{extra}="
+      # The dependency's own packages still import it; the project's do not.
+      lines.join("\n").should contain "--import #{registry.stamp("pair", "v1.0")}pair:extra=#{extra}"
+      lines.join("\n").should_not contain "app:extra="
+      zane(["tree"], project)[1].should contain "pair v1.0 (extra dropped, pair)"
+      zane(["rename", "off", "pair", "extra"], project).should eq({0, "`extra` of pair is imported by its own name again.\n", ""})
+      rename_rows(project).should be_empty
+    end
+  end
+
+  it "reads a dependency's own renames for its own packages" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      registry.publish("wrap", "v1.0", deps: [{"math", "v1.0"}], renames: [{"math", "math", "m"}])
+      zane(["add", registry.url("wrap")], project)[0].should eq 0
+      FileUtils.rm_f(log)
+      zane(["check"], project)[0].should eq 0
+      text = File.read(log)
+      text.should contain "--import #{registry.id("wrap", "v1.0")}:m=#{registry.id("math", "v1.0")}"
+      text.should_not contain "app:m="
+    end
+  end
+
+  it "refuses rows that break the rules of dependencies.md §2.1" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      {
+        {["rename", "nope", "math", "x"], "the project does not depend on `nope`"},
+        {["rename", "math", "math", "_x"], "which is not a package name"},
+        {["rename", "math", "math", "Big"], "which is not a package name"},
+        {["rename", "math", "math", "test"], "the name of every test package"},
+        {["rename", "math", "math", "math"], "its own name, which changes nothing"},
+        {["rename", "math", "geometry", "geo"], "names a package https://example.com/math v1.0 does not ship"},
+      }.each do |args, message|
+        expect_raises(Zane::UserError, message) { zane(args, project) }
+      end
+      zane(["rename", "off", "math", "math"], project)[1].should contain "is not renamed; nothing changed"
+      expect_raises(Zane::UserError, "--rename takes PACKAGE=NAME") do
+        zane(["add", registry.url("math"), "--as", "other", "--rename", "math"], project)
+      end
+
+      base = File.read(project / "zane.coda")
+      {
+        {"renames [\n    key package name\n    math math m\n]\n", "is a table of `dependency`, `package` and `name`"},
+        {"renames [\n    dependency package name\n    math math m\n    math math n\n]\n", "two rows for the package `math` of `math`"},
+        {"renames [\n    dependency package name\n    other math m\n]\n", "names `other`, which is not a dependency"},
+      }.each do |table, message|
+        File.write(project / "zane.coda", base + "\n" + table)
+        expect_raises(Zane::UserError, message) { Zane::Manifest.load(project) }
+      end
     end
   end
 end
