@@ -136,9 +136,10 @@ module Zane::Commands
       {tag, commit}
     end
 
-    # The names of the public library packages *dep* gives the project
-    # (spec packages.md §4.3), read from its checkout or local project. Nil
-    # when its code cannot be read here.
+    # The own names of *dep*'s public library packages (spec packages.md
+    # §4.3), read from its checkout or local project, before any `renames`
+    # row of the project's (`Manifest#import_name` maps them). Nil when its
+    # code cannot be read here.
     private def package_names(dep : Dependency) : Array(String)?
       root = if Manifest.path?(dep.from)
                Path[dep.from].expand(workspace.root)

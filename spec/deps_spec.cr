@@ -1344,3 +1344,46 @@ describe "renames" do
     end
   end
 end
+
+describe "renames across the other commands" do
+  it "keeps the rows through update, and refuses a tag that no longer ships a renamed package" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      registry.publish("math-two", "v1.0", package_name: "math")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["add", registry.url("math-two"), "--as", "two", "--rename", "math=twoMath"], project)[0].should eq 0
+      registry.publish("math-two", "v1.1", package_name: "math")
+      zane(["update", "two"], project)[0].should eq 0
+      rename_rows(project).should eq ["dependency package name", "two math twoMath"]
+      registry.publish("math-two", "v1.2", package_name: "algebra")
+      expect_raises(Zane::UserError, "`zane rename off two math` removes the row") do
+        zane(["update", "two"], project)
+      end
+    end
+  end
+
+  it "gives a test-deps package its name in the test build alone" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      registry.publish("math-two", "v1.0", package_name: "math")
+      add_library(project)
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["add", registry.url("math-two"), "--as", "two", "--test", "--rename", "math=twoMath"], project)[1]
+        .should contain "Import its packages in test/ with: import twoMath"
+      FileUtils.rm_f(log)
+      zane(["check"], project)[0].should eq 0
+      test = File.read_lines(log).find! { |l| l.includes?("--package test=") }
+      test.should contain "--import test:twoMath=#{registry.stamp("math-two", "v1.0")}math"
+      test.should contain "--import test:math=#{registry.id("math", "v1.0")}"
+    end
+  end
+
+  it "points out the files that still import a removed package by its project name" do
+    with_registry do |registry, project|
+      registry.publish("math-two", "v1.0", package_name: "math")
+      zane(["add", registry.url("math-two"), "--as", "two", "--rename", "math=twoMath"], project)[0].should eq 0
+      File.write(project / "bin" / "app" / "main.zn", "package app;\nimport twoMath;\nimport math;\n")
+      zane(["remove", "two"], project)[2].should eq "zane: warning: bin/app/main.zn:2 still imports a package of two\n"
+    end
+  end
+end

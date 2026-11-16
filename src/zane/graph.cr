@@ -260,7 +260,8 @@ module Zane
       rows.each do |r|
         next if publics.includes?(r.package)
         raise UserError.new("#{where}: the rename of `#{r.package}` of `#{dep.key}` names a package " \
-                            "#{package.url} #{package.tag} does not ship; its public library packages are #{publics.join(", ")}")
+                            "#{package.url} #{package.tag} does not ship; its public library packages are #{publics.join(", ")}, " \
+                            "and `zane rename off #{dep.key} #{r.package}` removes the row")
       end
       if publics.all? { |name| manifest.import_name(dep.key, name).nil? }
         raise UserError.new("#{where}: the `renames` rows drop every package of `#{dep.key}` (#{package.url}), " \
