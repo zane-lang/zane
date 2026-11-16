@@ -505,7 +505,7 @@ module Zane::Commands
   # again (spec dependencies.md §2.1, §2.3, §8).
   class Rename < EditCommand
     def usage : String
-      "usage: zane rename <key> <package> <name> | zane rename off <key> <package>"
+      "usage: zane rename <key> <package> <name> | zane rename off <key> <package> | zane rename <key> <package> <package>"
     end
 
     def arity : Range(Int32, Int32)
@@ -515,8 +515,11 @@ module Zane::Commands
     def run : Int32
       ws = workspace
       manifest = ws.manifest
-      off = @args[0] == "off" && manifest.dependency?("off").nil?
-      key, package = off ? {@args[1], @args[2]} : {@args[0], @args[1]}
+      # Naming the package's own name removes its row too, which works
+      # whatever the keys are, a key `off` included.
+      off_form = @args[0] == "off" && manifest.dependency?("off").nil?
+      key, package = off_form ? {@args[1], @args[2]} : {@args[0], @args[1]}
+      off = off_form || @args[1] == @args[2]
       dependency(key)
       current = manifest.renames.find { |r| r.dependency == key && r.package == package }
       others = manifest.renames.reject { |r| r.dependency == key && r.package == package }

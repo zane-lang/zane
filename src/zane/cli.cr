@@ -33,7 +33,7 @@ module Zane::CLI
       remap <url>            link the interchangeable versions of the package at url as one
       unremap <url>          link its versions side by side again
       rename <key> <pkg> <name>  import key's package pkg by name, or drop it when name is _
-      rename off <key> <pkg> import it by its own name again
+      rename off <key> <pkg> import it by its own name again, as rename <key> <pkg> <pkg> does
       fetch                  fetch what a build needs, so it can then run offline
       tree [--test]          show the packages the project, or its test build, depends on
       cache list|path|clean  show, locate or empty the package cache

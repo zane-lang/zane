@@ -1322,12 +1322,15 @@ describe "renames" do
         {["rename", "math", "math", "_x"], "which is not a package name"},
         {["rename", "math", "math", "Big"], "which is not a package name"},
         {["rename", "math", "math", "test"], "the name of every test package"},
-        {["rename", "math", "math", "math"], "its own name, which changes nothing"},
         {["rename", "math", "geometry", "geo"], "names a package https://example.com/math v1.0 does not ship"},
       }.each do |args, message|
         expect_raises(Zane::UserError, message) { zane(args, project) }
       end
       zane(["rename", "off", "math", "math"], project)[1].should contain "is not renamed; nothing changed"
+      zane(["rename", "math", "math", "math"], project)[1].should contain "is not renamed; nothing changed"
+      expect_raises(Zane::UserError, "its own name, which changes nothing") do
+        zane(["add", registry.url("math"), "--as", "same", "--rename", "math=math"], project)
+      end
       expect_raises(Zane::UserError, "--rename takes PACKAGE=NAME") do
         zane(["add", registry.url("math"), "--as", "other", "--rename", "math"], project)
       end
@@ -1384,6 +1387,22 @@ describe "renames across the other commands" do
       zane(["add", registry.url("math-two"), "--as", "two", "--rename", "math=twoMath"], project)[0].should eq 0
       File.write(project / "bin" / "app" / "main.zn", "package app;\nimport twoMath;\nimport math;\n")
       zane(["remove", "two"], project)[2].should eq "zane: warning: bin/app/main.zn:2 still imports a package of two\n"
+    end
+  end
+end
+
+describe "zane rename with a dependency keyed off" do
+  it "removes a row by naming the package's own name" do
+    with_registry do |registry, project|
+      registry.publish("math", "v1.0")
+      registry.publish("math-two", "v1.0", package_name: "math")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["add", registry.url("math-two"), "--as", "off", "--rename", "math=twoMath"], project)[0].should eq 0
+      zane(["rename", "off", "math", "second"], project)[0].should eq 0
+      rename_rows(project).should eq ["dependency package name", "off math second"]
+      zane(["rename", "math", "math", "algebra"], project)[0].should eq 0
+      zane(["rename", "math", "math", "math"], project).should eq({0, "`math` of math is imported by its own name again.\n", ""})
+      rename_rows(project).should eq ["dependency package name", "off math second"]
     end
   end
 end
