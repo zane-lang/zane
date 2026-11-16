@@ -45,6 +45,21 @@ module Zane
       doc.root[block].as_keyed_table
     end
 
+    # The `renames` table of *doc*, made when it has none.
+    def self.renames(doc : Coda::Doc) : Coda::Table
+      doc.root[Manifest::RENAMES] = Coda::Table.new(Manifest::RENAME_COLUMNS) unless doc.root.has_key?(Manifest::RENAMES)
+      doc.root[Manifest::RENAMES].as_table
+    end
+
+    # Deletes each `renames` row of *doc* the block selects, and the table
+    # when no row is left.
+    def self.delete_renames(doc : Coda::Doc, & : Coda::Row -> Bool) : Nil
+      return unless doc.root.has_key?(Manifest::RENAMES)
+      table = doc.root[Manifest::RENAMES].as_table
+      (table.size - 1).downto(0) { |i| table.delete_at(i) if yield table[i] }
+      doc.root.delete(Manifest::RENAMES) if table.empty?
+    end
+
     def self.resolutions(doc : Coda::Doc) : Coda::KeyedTable
       doc.root["resolutions"].as_keyed_table
     end

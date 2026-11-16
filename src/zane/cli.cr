@@ -24,13 +24,16 @@ module Zane::CLI
                              --target TRIPLE, as zane build does
       add <url> [tag]        depend on the library at url, at its newest tag or the one named;
                              with --test, for the test package alone; with --from-source,
-                             compiled here, which also switches a library already added
+                             compiled here, which also switches a library already added;
+                             with --rename pkg=name, its package pkg imported by name
       remove <key>           stop depending on key
       update [key [tag]]     move key, or every dependency, to its newest tag or the one named
       dev <key> <path>       compile key from the local project at path
       dev off <key>          link key's release again
       remap <url>            link the interchangeable versions of the package at url as one
       unremap <url>          link its versions side by side again
+      rename <key> <pkg> <name>  import key's package pkg by name, or drop it when name is _
+      rename off <key> <pkg> import it by its own name again, as rename <key> <pkg> <pkg> does
       fetch                  fetch what a build needs, so it can then run offline
       tree [--test]          show the packages the project, or its test build, depends on
       cache list|path|clean  show, locate or empty the package cache
@@ -72,6 +75,7 @@ module Zane::CLI
       when "dev"       then Commands::Dev.new(args[1..], stdout, stderr).run
       when "remap"     then Commands::Remap.new(true, args[1..], stdout, stderr).run
       when "unremap"   then Commands::Remap.new(false, args[1..], stdout, stderr).run
+      when "rename"    then Commands::Rename.new(args[1..], stdout, stderr).run
       when "tree"      then Commands::Tree.new(args[1..], stdout, stderr).run
       when "cache"     then Commands::Cache.new(args[1..], stdout, stderr).run
       when "toolchain" then Commands::Toolchain.new(args[1..], stdout, stderr).run

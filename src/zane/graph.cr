@@ -50,9 +50,23 @@ module Zane
       end
     end
 
-    # A dependency as a package's manifest records it: the key it imports
-    # the package by, and the version it pins.
-    record Edge, key : String, package : Package
+    # A dependency as a package's manifest records it: the key it names the
+    # package by, and the version it pins. *owner* is that manifest, whose
+    # `renames` rows say what its packages import the dependency's packages
+    # by (spec dependencies.md §2.1, §8).
+    record Edge, key : String, package : Package, owner : Manifest do
+      # The name *library* of the package is imported by along this edge,
+      # or nil when the owner drops it.
+      def name(library : String) : String?
+        owner.import_name(key, library)
+      end
+
+      # The public library packages of *target*, by the name each is
+      # imported by along this edge, the dropped ones left out.
+      def publics(target : Package = package) : Array({String, Layout::Lib})
+        target.layout.public_libs.compact_map { |l| name(l.name).try { |n| {n, l} } }
+      end
+    end
 
     def self.node(url : PackageUrl, tag : String) : String
       "#{url.normalized} #{tag}"
@@ -178,14 +192,16 @@ module Zane
             raise UserError.new("#{url} #{dep.version} is pinned to both #{seen.commit} and #{resolution.commit} " \
                                 "(by #{manifest.root}); one tag is one commit")
           end
-          edges << Edge.new(dep.key, seen)
+          check_renames(manifest, dep, seen)
+          edges << Edge.new(dep.key, seen, manifest)
           next
         end
         top = @top[node]?
         package = load(top || dep, resolution, url, from(top), manifest)
         check(package)
+        check_renames(manifest, dep, package)
         @nodes[node] = package
-        edges << Edge.new(dep.key, package)
+        edges << Edge.new(dep.key, package, manifest)
         visit(package.manifest, node, chain + [url.normalized])
         @packages << package
       end
@@ -231,6 +247,26 @@ module Zane
         raise UserError.new("#{other} and #{package.url} have the same identity hash, so their symbols would collide")
       end
       @hashes[hash] = package.url.normalized
+    end
+
+    # The rules of *manifest*'s `renames` rows for *dep* that need its
+    # checkout (§2.1): each names a public library package it ships, and
+    # they do not drop every one.
+    private def check_renames(manifest : Manifest, dep : Dependency, package : Package) : Nil
+      rows = manifest.renames.select { |r| r.dependency == dep.key }
+      return if rows.empty?
+      publics = package.layout.public_libs.map(&.name)
+      where = "#{manifest.root / Manifest::FILE}"
+      rows.each do |r|
+        next if publics.includes?(r.package)
+        raise UserError.new("#{where}: the rename of `#{r.package}` of `#{dep.key}` names a package " \
+                            "#{package.url} #{package.tag} does not ship; its public library packages are #{publics.join(", ")}, " \
+                            "and `zane rename off #{dep.key} #{r.package}` removes the row")
+      end
+      if publics.all? { |name| manifest.import_name(dep.key, name).nil? }
+        raise UserError.new("#{where}: the `renames` rows drop every package of `#{dep.key}` (#{package.url}), " \
+                            "so the project has nothing to import from it; remove the dependency instead")
+      end
     end
 
     # The project's compiler builds every package of the graph, so each
@@ -292,8 +328,30 @@ module Zane
             @layout.programs.map { |p| {p.name, "bin/#{p.name}/"} }
       distinct(own, direct, "the project reaches")
       distinct(own + publics(direct), test_direct, "the project's tests reach") if @test
+      apart(subpackages(@layout.libs), "", direct, "the project reaches")
+      apart(subpackages(@layout.tests.select(&.nested?).map { |t| @layout.lib?(t.path).not_nil! }), "", test_direct, "the project's tests reach") if @test
       @packages.each do |p|
         distinct(p.layout.top_libs.map { |l| {l.name, "lib/#{l.name}/ of #{p.url}"} }, dependencies(p), "#{p.url} reaches")
+        apart(subpackages(p.layout.libs), " of #{p.url}", dependencies(p), "#{p.url} reaches")
+      end
+    end
+
+    private def subpackages(libs : Array(Layout::Lib)) : Array(Layout::Lib)
+      libs.reject(&.top?)
+    end
+
+    # A subpackage's name stays apart from the names its project reaches
+    # its dependencies' packages by, since the package that holds it
+    # imports both, and in a test build apart from those of the project's
+    # `test-deps` when a nested test package, which imports both, tests it
+    # (dependencies.md §8). Two subpackages may share a name.
+    private def apart(libs : Array(Layout::Lib), of : String, edges : Array(Edge), whose : String) : Nil
+      names = publics(edges).to_h
+      libs.each do |l|
+        next unless other = names[l.name]?
+        raise UserError.new("#{whose} two packages named `#{l.name}`: the subpackage lib/#{l.path.tr(".", "/")}/#{of} and #{other}; " \
+                            "a subpackage's name stays apart from the dependencies' packages, so rename its directory, " \
+                            "or give the dependency's package another name with `zane rename`")
       end
     end
 
@@ -302,7 +360,8 @@ module Zane
       (names + publics(edges)).each do |name, where|
         if other = seen[name]?
           raise UserError.new("#{whose} two packages named `#{name}`: #{other} and #{where}; " \
-                              "the packages a project imports have distinct names")
+                              "the packages a project imports have distinct names; `zane rename`, or `zane add --rename`, " \
+                              "gives a dependency's package another name in the project, or drops it")
         end
         seen[name] = where
       end
@@ -310,7 +369,10 @@ module Zane
 
     private def publics(edges : Array(Edge)) : Array({String, String})
       edges.flat_map do |e|
-        e.package.layout.public_libs.map { |l| {l.name, "`#{l.name}` of the dependency `#{e.key}` (#{e.package.url})"} }
+        e.publics.map do |name, l|
+          renamed = name == l.name ? "" : ", renamed `#{name}`"
+          {name, "`#{l.name}` of the dependency `#{e.key}` (#{e.package.url})#{renamed}"}
+        end
       end
     end
 
@@ -338,11 +400,20 @@ module Zane
     end
 
     # Each public library package of *edges*' packages, by the key it is
-    # imported by, its name, and what the compiler knows it by.
+    # imported by, its name, and what the compiler knows it by. A remapped
+    # edge keeps the packages of the version it pins, each found in the
+    # version chosen in its place.
     def public_keys(edges : Array(Edge), remapped : Bool = true) : Array({String, String})
       edges.flat_map do |e|
         target = remapped ? resolved(e.package) : e.package
-        target.layout.public_libs.map { |l| {l.name, target.id(l)} }
+        e.publics.map do |name, l|
+          found = target.layout.public_libs.find { |t| t.name == l.name }
+          unless found
+            raise UserError.new("#{e.package.url} #{target.tag}, linked in place of #{e.package.tag}, has no public package `#{l.name}`, " \
+                                "which #{e.package.tag} has; `zane unremap #{e.package.url}` links each version as it is")
+          end
+          {name, target.id(found)}
+        end
       end
     end
 

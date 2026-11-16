@@ -26,6 +26,15 @@ module Zane
     end
   end
 
+  # One `renames` row of a manifest (spec dependencies.md §2.1): the
+  # dependency *dependency*'s package *package* is imported by *name*, or by
+  # no package of the project when *name* is `_`.
+  record Rename, dependency : String, package : String, name : String do
+    def drop? : Bool
+      name == Manifest::DROP
+    end
+  end
+
   # One `resolutions` row of a lock file (§2.2).
   record Resolution, url : String, commit : String
 
@@ -40,6 +49,11 @@ module Zane
 
     DEPS      = "deps"
     TEST_DEPS = "test-deps"
+    RENAMES   = "renames"
+
+    # The columns of a `renames` row, and the name that drops a package.
+    RENAME_COLUMNS = ["dependency", "package", "name"]
+    DROP           = "_"
 
     # How much memory the fixed-size regions of nested scopes may take, in
     # the program's own thread of execution and in each spawned call's
@@ -60,13 +74,16 @@ module Zane
     # §7.3).
     getter test_deps : Array(Dependency)
     getter remaps : Array(String)
+    # The names the project's packages import its dependencies' packages
+    # by, where they are not the packages' own (§2.1, §8).
+    getter renames : Array(Rename)
     getter resolutions : Hash(String, Resolution)
     # Each in bytes, or nil when the manifest leaves it to the compiler.
     getter fixed_region : Int64?
     getter spawned_fixed_region : Int64?
 
     def initialize(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions,
-                   @fixed_region = nil, @spawned_fixed_region = nil)
+                   @fixed_region = nil, @spawned_fixed_region = nil, @renames = [] of Rename)
     end
 
     def self.path?(from : String) : Bool
@@ -95,8 +112,14 @@ module Zane
       if both = test_deps.find { |t| deps.any? { |d| d.key == t.key } }
         raise UserError.new("#{path}: `#{both.key}` is in both `#{DEPS}` and `#{TEST_DEPS}`")
       end
+      renames = read_renames(doc, path)
+      renames.each do |r|
+        if error = Manifest.rename_error(r, deps + test_deps)
+          raise UserError.new("#{path}: #{error}")
+        end
+      end
       new(root, zane_version, pattern, deps, test_deps, read_remaps(doc, path), read_lock(root),
-        read_region(doc, path, FIXED_REGION), read_region(doc, path, SPAWNED_FIXED_REGION))
+        read_region(doc, path, FIXED_REGION), read_region(doc, path, SPAWNED_FIXED_REGION), renames)
     end
 
     # A region size in bytes, or nil when the field is absent.
@@ -154,6 +177,53 @@ module Zane
       remaps
     end
 
+    private def self.read_renames(doc : Coda::Block, path : Path) : Array(Rename)
+      renames = [] of Rename
+      node = doc[RENAMES]? || return renames
+      table = node.as?(Coda::Table)
+      unless table && table.columns == RENAME_COLUMNS
+        raise UserError.new("#{path}: `#{RENAMES}` is a table of `dependency`, `package` and `name`")
+      end
+      table.each do |row|
+        rename = Rename.new(row["dependency"], row["package"], row["name"])
+        if renames.any? { |r| r.dependency == rename.dependency && r.package == rename.package }
+          raise UserError.new("#{path}: `#{RENAMES}` has two rows for the package `#{rename.package}` of `#{rename.dependency}`")
+        end
+        renames << rename
+      end
+      renames
+    end
+
+    # Why *rename* breaks the rules of a `renames` row that need only the
+    # manifest (§2.1), or nil: the package of a dependency it has, under a
+    # package name of its own or `_`.
+    def self.rename_error(rename : Rename, deps : Array(Dependency)) : String?
+      what = "the rename of `#{rename.package}` of `#{rename.dependency}`"
+      if deps.none? { |d| d.key == rename.dependency }
+        return "#{what} names `#{rename.dependency}`, which is not a dependency of the project"
+      end
+      unless Project.valid_name?(rename.package)
+        return "#{what} names `#{rename.package}`, which is not a package name"
+      end
+      return nil if rename.drop?
+      if !Project.valid_name?(rename.name) || rename.name.starts_with?('_')
+        "#{what} gives it `#{rename.name}`, which is not a package name: it is camelCase, and only `_` alone, " \
+        "which drops the package, begins with `_`"
+      elsif rename.name == Project::TEST_PACKAGE
+        "#{what} gives it `#{Project::TEST_PACKAGE}`, the name of every test package"
+      elsif rename.name == rename.package
+        "#{what} gives it its own name, which changes nothing"
+      end
+    end
+
+    # The name the project imports *package* of the dependency *key* by:
+    # its own, the one a `renames` row gives it, or nil when a row drops it.
+    def import_name(key : String, package : String) : String?
+      rename = @renames.find { |r| r.dependency == key && r.package == package }
+      return package unless rename
+      rename.drop? ? nil : rename.name
+    end
+
     private def self.read_lock(root : Path) : Hash(String, Resolution)
       path = root / LOCK
       raise UserError.new("#{root} holds #{FILE} but no #{LOCK}") unless File.file?(path)
@@ -205,7 +275,13 @@ module Zane
         deps = deps.any? { |d| d.key == dep.key } ? deps.map { |d| d.key == dep.key ? dep : d } : deps + [dep]
       end
       Manifest.new(@root, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions,
-        @fixed_region, @spawned_fixed_region)
+        @fixed_region, @spawned_fixed_region, @renames)
+    end
+
+    # The manifest with *renames* as its `renames` rows.
+    def with_renames(renames : Array(Rename)) : Manifest
+      Manifest.new(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions,
+        @fixed_region, @spawned_fixed_region, renames)
     end
 
     # The manifest built by the compiler release *tag*, its lock row pinning
@@ -214,7 +290,7 @@ module Zane
       resolutions = @resolutions.dup
       resolutions[COMPILER_KEY] = Resolution.new(CompilerRelease::URL, commit)
       Manifest.new(@root, tag, @version_pattern, @deps, @test_deps, @remaps, resolutions,
-        @fixed_region, @spawned_fixed_region)
+        @fixed_region, @spawned_fixed_region, @renames)
     end
 
     # Every dependency: the `deps` rows, then the `test-deps` rows.
