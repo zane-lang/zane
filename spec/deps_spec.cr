@@ -1428,6 +1428,22 @@ describe "subpackage names" do
     end
   end
 
+  it "keeps a test-dep's package apart only from a subpackage a nested test imports" do
+    with_registry do |registry, project|
+      registry.publish("opengl", "v1.0")
+      Dir.mkdir_p(project / "lib" / "gui" / "opengl")
+      File.write(project / "lib" / "gui" / "gui.zn", "package gui;\n")
+      File.write(project / "lib" / "gui" / "opengl" / "gl.zn", "package opengl;\n")
+      Dir.mkdir_p(project / "test" / "gui" / "opengl")
+      File.write(project / "test" / "gui" / "opengl" / "gl_test.zn", "package test;\n")
+      expect_raises(Zane::UserError, "the project's tests reach two packages named `opengl`: the subpackage lib/gui/opengl/ and `opengl` of the dependency `opengl`") do
+        zane(["add", registry.url("opengl"), "--test"], project)
+      end
+      FileUtils.rm_rf(project / "test" / "gui" / "opengl")
+      zane(["add", registry.url("opengl"), "--test"], project)[0].should eq 0
+    end
+  end
+
   it "lets two subpackages of different parents share a name" do
     with_registry do |_, project|
       {"gui", "render"}.each do |top|
