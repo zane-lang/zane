@@ -308,8 +308,9 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   `build-from-source/<target>.coda` records the commit, target and compiler
   pin it was compiled with, and the object is reused only while all four
   match, and, for one compiled for a program, the hash below. Before a program or test is linked, `zanec --write-backs` writes
-  the file of the places its spawned calls write back into, into
-  `out/write-backs/`, and each `source` and path dependency is compiled for that
+  the file of the places its spawned calls write back into, into a file of
+  its own in `out/write-backs/`, removed once the dependencies are compiled,
+  and each `source` and path dependency is compiled for that
   program alone with `--program-write-backs`, so its reads of every other
   place are plain loads rather than snapshots (compiler
   [`lowering.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/lowering.md)

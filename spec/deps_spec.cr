@@ -449,8 +449,9 @@ describe Zane::Commands::Add do
       id = registry.id("math", "v1.0")
       compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
       compiled.size.should eq 1
-      places = project / "out" / "write-backs" / "host-app#{program_suffix}"
-      compiled[0].should end_with "--program-write-backs #{places} --package #{id}=#{entry("math", "v1.0") / "src" / "lib" / "math"}"
+      places = project / "out" / "write-backs" / "host-app#{program_suffix}-"
+      compiled[0].should match /--program-write-backs #{Regex.escape(places.to_s)}[0-9a-f]{16} --package #{Regex.escape(id)}=/
+      Dir.children(project / "out" / "write-backs").should be_empty
       object = entry("math", "v1.0") / "build-from-source" / for_program / "package.o"
       File.read(object).should contain "--package #{id}="
       File.read_lines(log).last.should end_with "--import app:math=#{id} --link #{object}"
@@ -463,7 +464,7 @@ describe Zane::Commands::Add do
       registry.publish("math", "v1.0", artifacts: false)
       zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
       zane(["build"], project)[0].should eq 0
-      File.read(project / "out" / "write-backs" / "host-app#{program_suffix}").should eq NO_PLACES
+      File.read_lines(log).any?(&.starts_with?("--write-backs #{project / "out" / "write-backs" / "host-app#{program_suffix}-"}")).should be_true
       ENV["FAKE_WRITE_BACKS"] = NO_PLACES
       zane(["build", "-o", (project / "other").to_s], project)[0].should eq 0
       File.read_lines(log).count(&.starts_with?("--no-root --object")).should eq 1
@@ -474,7 +475,7 @@ describe Zane::Commands::Add do
       compiled.size.should eq 2
       dir = entry("math", "v1.0") / "build-from-source"
       compiled.last.should start_with "--no-root --object #{dir / ".#{for_program(written)}."}"
-      compiled.last.should contain "--program-write-backs #{project / "out" / "write-backs" / "host-app#{program_suffix}"}"
+      compiled.last.should contain "--program-write-backs #{project / "out" / "write-backs" / "host-app#{program_suffix}-"}"
       File.read_lines(log).last.should end_with "--link #{dir / for_program(written) / "package.o"}"
       record = File.read(dir / "#{for_program(written)}.coda")
       record.should contain Zane::SHA256.hexdigest(written)
@@ -515,9 +516,10 @@ describe Zane::Commands::Add do
       zane(["build"], project)[0].should eq 0
       shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
       object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("shapes")).identity_hash / "v2.0" / "package.o"
-      places = project / "out" / "write-backs" / "host-app#{program_suffix}"
-      File.read_lines(log)[-2].should eq(
-        "--no-root --object #{object} --program-write-backs #{places} --package #{shapes}=#{local / "lib" / "shapes"} " \
+      places = project / "out" / "write-backs" / "host-app#{program_suffix}-"
+      compiled = File.read_lines(log)[-2].sub(/(--program-write-backs #{Regex.escape(places.to_s)})[0-9a-f]{16}/, "\\1*")
+      compiled.should eq(
+        "--no-root --object #{object} --program-write-backs #{places}* --package #{shapes}=#{local / "lib" / "shapes"} " \
         "--package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} --import #{shapes}:math=#{math}")
       File.read_lines(log).last.should end_with(
         "--package #{shapes}=#{local / "lib" / "shapes"} --package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} " \
