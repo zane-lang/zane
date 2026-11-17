@@ -301,13 +301,16 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   were made with. The objects are reused only while all five match;
   otherwise they are rewritten again, from the kept archive when its hash
   still matches.
-- **Compiling from source.** A `source` dependency is compiled on its own
-  from its checkout, into `build-from-source/<target>/package.o`, with the
+- **Compiling from source.** A `source` dependency is compiled on its own,
+  optimized, from its checkout, into `build-from-source/<target>/package.o`, with the
   files the compiler writes beside it (§5), named with its stamp, against the versions its own lock file pins
   ([§12.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#121-source-compilation-is-explicit-opt-in)).
   `build-from-source/<target>.coda` records the commit, target and compiler
-  pin it was compiled with, and the object is reused only while all four
-  match, and, for one compiled for a program, the hash below. Before a program or test is linked, `zanec --write-backs` writes
+  pin it was compiled with, and that it was optimized, and the object is
+  reused only while all five match, and, for one compiled for a program,
+  the hash below. The object is the code a program runs wherever it calls
+  the dependency without inlining it, so it is optimized, once, and reused.
+  Before a program or test is linked, `zanec --write-backs` writes
   the file of the places its spawned calls write back into, into a file of
   its own in `out/write-backs/`, removed once the dependencies are compiled,
   and each `source` and path dependency is compiled for that
@@ -322,7 +325,8 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   share one object. When the compiler cannot write the
   file, as for a program it refuses, and while remapping moves what the
   objects name, which those places do not follow, a dependency is compiled
-  for any program, into `build-from-source/<target>/`. A path dependency is compiled the same way on every build, into the
+  for any program, into `build-from-source/<target>/`. A path dependency is compiled the same way on every build, but
+  unoptimized, so a build stays quick while it changes, into the
   project's `out/deps/<target>/`, emptied first so it holds only that
   build's files, and never enters the cache
   ([§12.2](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#122-local-path-dependencies)).

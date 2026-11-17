@@ -143,10 +143,10 @@ module Zane
     # The object compiled from the checkout of *commit* for *target*, for a
     # dependency compiled from source (§12.1), with what the compiler wrote
     # beside it. It is kept apart from the release's objects, and reused
-    # only while it was compiled from the same commit by the same compiler
-    # pin, *toolchain*. An object compiled for the programs that write back
-    # into the places whose file hashes to *places* is kept apart from one
-    # compiled for any program, and from one for other places. The block
+    # only while it was compiled, optimized, from the same commit by the same
+    # compiler pin, *toolchain*. An object compiled for the programs that
+    # write back into the places whose file hashes to *places* is kept apart
+    # from one compiled for any program, and from one for other places. The block
     # compiles it to the path it is given. The second value says whether
     # the cache already held it.
     def compiled(commit : String, target : String, toolchain : {String, String}, places : String? = nil, & : Path ->) : {Array(Path), Bool}
@@ -155,7 +155,7 @@ module Zane
       built = dir / slot
       object = built / "package.o"
       record = dir / "#{slot}.coda"
-      wanted = {"commit" => commit, "target" => target,
+      wanted = {"commit" => commit, "target" => target, "optimized" => "yes",
                 "zane-version" => toolchain[0], "zane-commit" => toolchain[1]}
       wanted["write-backs"] = places if places
       return {files(built), true} if File.file?(object) && read_record(record) == wanted

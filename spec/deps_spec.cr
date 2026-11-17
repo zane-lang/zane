@@ -454,8 +454,22 @@ describe Zane::Commands::Add do
       Dir.children(project / "out" / "write-backs").should be_empty
       object = entry("math", "v1.0") / "build-from-source" / for_program / "package.o"
       File.read(object).should contain "--package #{id}="
+      compiled[0].should match /^--no-root --object \S+ --optimize /
       File.read_lines(log).last.should end_with "--import app:math=#{id} --link #{object}"
       registry.fetched.should be_empty
+    end
+  end
+
+  it "compiles a library from source again when the cache holds it unoptimized" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0", artifacts: false)
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+      record = entry("math", "v1.0") / "build-from-source" / "#{for_program}.coda"
+      File.read(record).should contain "optimized"
+      File.write(record, File.read_lines(record).reject(&.includes?("optimized")).join("\n") + "\n")
+      zane(["build"], project)[0].should eq 0
+      File.read_lines(log).count(&.starts_with?("--no-root --object")).should eq 2
     end
   end
 
