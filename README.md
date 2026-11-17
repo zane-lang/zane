@@ -62,7 +62,7 @@ A few things that stand out:
 - A variable is written name first, then its type: `x Int`, `p Point(…)`. A
   function starts with what it returns: `Int steps(…)`.
 - `Int`, `Bool`, `if`, `else` and the `to` loop are ordinary code from the
-  [`core`](https://github.com/zane-lang/core) package, written in Zane. The
+  [`core`](https://github.com/zane-lang/std/tree/main/lib/core) package, written in Zane. The
   language itself has no `if` or `while` keyword.
 - A call says what it may do to its subject: `p:steps()` only reads `p`,
   while `console!print(…)` and `i!to(…)` may change theirs.
@@ -116,12 +116,13 @@ zane run
 program in `bin/hello/main.zn`; `zane run` builds it and prints
 `hello world`.
 
-To write code like the example above, add the `core` package and replace
+To write code like the example above, add [`std`](https://github.com/zane-lang/std),
+which holds the `core` package, and replace
 `bin/hello/main.zn` with the example (keeping `package hello;` as its first
 line):
 
 ```sh
-zane add https://github.com/zane-lang/core --from-source
+zane add https://github.com/zane-lang/std --from-source
 zane run
 ```
 
@@ -190,7 +191,7 @@ in:
 Every spec document has a matching *design story* in
 [`stories/`](https://github.com/zane-lang/spec/tree/main/stories) that tells
 why the language looks the way it does. The
-[`core` tests](https://github.com/zane-lang/core/tree/main/test/core) are the
+[`core` tests](https://github.com/zane-lang/std/tree/main/test/core) are the
 largest body of working Zane code.
 
 ## The other repositories
@@ -199,7 +200,7 @@ largest body of working Zane code.
 |---|---|
 | [`compiler`](https://github.com/zane-lang/compiler) | `zanec`, the compiler that `zane` runs |
 | [`spec`](https://github.com/zane-lang/spec) | The language specification and its design stories |
-| [`core`](https://github.com/zane-lang/core) | The `core`, `math` and `regex` packages: numbers, text, lists, control flow, regular expressions |
+| [`std`](https://github.com/zane-lang/std) | The `core`, `math` and `regex` packages: numbers, text, lists, control flow, regular expressions |
 | [`zane-nvim`](https://github.com/zane-lang/zane-nvim) | Neovim support |
 | [`coda`](https://github.com/zane-lang/coda) | The configuration format of `zane.coda` and other Zane files |
 
