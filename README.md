@@ -199,7 +199,7 @@ largest body of working Zane code.
 |---|---|
 | [`compiler`](https://github.com/zane-lang/compiler) | `zanec`, the compiler that `zane` runs |
 | [`spec`](https://github.com/zane-lang/spec) | The language specification and its design stories |
-| [`core`](https://github.com/zane-lang/core) | The `core` and `math` packages: numbers, text, lists, control flow |
+| [`core`](https://github.com/zane-lang/core) | The `core`, `math` and `regex` packages: numbers, text, lists, control flow, regular expressions |
 | [`zane-nvim`](https://github.com/zane-lang/zane-nvim) | Neovim support |
 | [`coda`](https://github.com/zane-lang/coda) | The configuration format of `zane.coda` and other Zane files |
 
