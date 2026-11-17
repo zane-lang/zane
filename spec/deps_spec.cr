@@ -117,7 +117,7 @@ private class Registry
   end
 end
 
-DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_ZANEC_C GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
+DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_ZANEC_C GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 FAKE_WRITE_BACKS FAKE_NO_WRITE_BACKS)
 
 private def with_registry(&)
   base = Path[File.join(Dir.tempdir, "zane-spec-deps-#{Random::Secure.hex(6)}")]
@@ -219,6 +219,20 @@ end
 
 private def entry(name : String, tag : String) : Path
   Zane::Home.packages / "example.com" / name / tag
+end
+
+# The file the fake compiler writes for a program's write-backs when
+# `FAKE_WRITE_BACKS` is unset, and the directory of `build-from-source/` an
+# object compiled for such a program is kept in.
+NO_PLACES = "zanec write-backs 1\n"
+
+# What the host's executables are named with.
+private def program_suffix : String
+  {{ flag?(:win32) ? ".exe" : "" }}
+end
+
+private def for_program(places : String = NO_PLACES, target : String = Zane::Target::HOST) : String
+  "#{target}.#{Zane::SHA256.hexdigest(places)[0, 16]}"
 end
 
 describe Zane::PackageUrl do
@@ -384,7 +398,7 @@ describe Zane::Commands::Add do
       File.write(project / "zane-lock.coda", File.read(project / "zane-lock.coda").sub(/\]\n\z/, "    shapes #{registry.url("shapes")} #{commit}\n]\n"))
       zane(["build"], project)[0].should eq 0
       zane(["build"], project)[0].should eq 0
-      source = entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST
+      source = entry("math", "v1.0") / "build-from-source" / for_program
       path = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("shapes")).identity_hash / "v2.0"
       [source, path].each do |dir|
         File.read_lines(log).last.should contain(
@@ -435,11 +449,60 @@ describe Zane::Commands::Add do
       id = registry.id("math", "v1.0")
       compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
       compiled.size.should eq 1
-      compiled[0].should end_with "--package #{id}=#{entry("math", "v1.0") / "src" / "lib" / "math"}"
-      object = entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST / "package.o"
+      places = project / "out" / "write-backs" / "host-app#{program_suffix}-"
+      compiled[0].should match /--program-write-backs #{Regex.escape(places.to_s)}[0-9a-f]{16} --package #{Regex.escape(id)}=/
+      Dir.children(project / "out" / "write-backs").should be_empty
+      object = entry("math", "v1.0") / "build-from-source" / for_program / "package.o"
       File.read(object).should contain "--package #{id}="
       File.read_lines(log).last.should end_with "--import app:math=#{id} --link #{object}"
       registry.fetched.should be_empty
+    end
+  end
+
+  it "compiles a library from source for the places a program writes back into, and shares it between programs that write the same" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0", artifacts: false)
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+      File.read_lines(log).any?(&.starts_with?("--write-backs #{project / "out" / "write-backs" / "host-app#{program_suffix}-"}")).should be_true
+      ENV["FAKE_WRITE_BACKS"] = NO_PLACES
+      zane(["build", "-o", (project / "other").to_s], project)[0].should eq 0
+      File.read_lines(log).count(&.starts_with?("--no-root --object")).should eq 1
+      written = "zanec write-backs 1\napp$Tally\t.n\t@primitives$I64\n"
+      ENV["FAKE_WRITE_BACKS"] = written
+      zane(["build"], project)[0].should eq 0
+      compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
+      compiled.size.should eq 2
+      dir = entry("math", "v1.0") / "build-from-source"
+      compiled.last.should start_with "--no-root --object #{dir / ".#{for_program(written)}."}"
+      compiled.last.should contain "--program-write-backs #{project / "out" / "write-backs" / "host-app#{program_suffix}-"}"
+      File.read_lines(log).last.should end_with "--link #{dir / for_program(written) / "package.o"}"
+      record = File.read(dir / "#{for_program(written)}.coda")
+      record.should contain Zane::SHA256.hexdigest(written)
+      Dir.exists?(dir / for_program).should be_true
+    end
+  end
+
+  it "compiles a library from source for any program when the compiler writes no write-backs" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0", artifacts: false)
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
+      ENV["FAKE_NO_WRITE_BACKS"] = "1"
+      zane(["build"], project)[0].should eq 0
+      compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
+      compiled.size.should eq 1
+      compiled[0].should_not contain "--program-write-backs"
+      object = entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST / "package.o"
+      File.read_lines(log).last.should end_with "--link #{object}"
+    end
+  end
+
+  it "runs no write-backs when no dependency is compiled from source" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+      File.read_lines(log).none?(&.starts_with?("--write-backs")).should be_true
     end
   end
 
@@ -453,8 +516,10 @@ describe Zane::Commands::Add do
       zane(["build"], project)[0].should eq 0
       shapes, math = registry.id("shapes", "v2.0"), registry.id("math", "v1.0")
       object = project / "out" / "deps" / Zane::Target::HOST / Zane::PackageUrl.parse(registry.url("shapes")).identity_hash / "v2.0" / "package.o"
-      File.read_lines(log)[-2].should eq(
-        "--no-root --object #{object} --package #{shapes}=#{local / "lib" / "shapes"} " \
+      places = project / "out" / "write-backs" / "host-app#{program_suffix}-"
+      compiled = File.read_lines(log)[-2].sub(/(--program-write-backs #{Regex.escape(places.to_s)})[0-9a-f]{16}/, "\\1*")
+      compiled.should eq(
+        "--no-root --object #{object} --program-write-backs #{places}* --package #{shapes}=#{local / "lib" / "shapes"} " \
         "--package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} --import #{shapes}:math=#{math}")
       File.read_lines(log).last.should end_with(
         "--package #{shapes}=#{local / "lib" / "shapes"} --package #{math}=#{entry("math", "v1.0") / "src" / "lib" / "math"} " \
@@ -1185,6 +1250,24 @@ describe Zane::Graph do
       tree.should contain "│   └── math v1.0.0 (math), https://example.com/math, prebuilt (remapped onto v1.2.0)"
       tree.should contain "Side by side: https://example.com/math v1.2.0, v2.0.0"
       tree.should contain "Remapped: https://example.com/math v1.0.0 onto v1.2.0"
+    end
+  end
+
+  it "compiles a library from source for any program while the project remaps, since remapping moves what its object names" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0.0")
+      registry.publish("math", "v1.2.0")
+      registry.publish("shapes", "v1.0", deps: [{"math", "v1.0.0"}], artifacts: false)
+      zane(["add", registry.url("shapes"), "--from-source"], project)[0].should eq 0
+      zane(["add", registry.url("math"), "v1.2.0"], project)[0].should eq 0
+      zane(["remap", registry.url("math")], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+      lines = File.read_lines(log)
+      lines.none?(&.starts_with?("--write-backs")).should be_true
+      compiled = lines.select(&.starts_with?("--no-root --object"))
+      compiled.size.should eq 1
+      compiled[0].should_not contain "--program-write-backs"
+      Dir.exists?(entry("shapes", "v1.0") / "build-from-source" / Zane::Target::HOST).should be_true
     end
   end
 

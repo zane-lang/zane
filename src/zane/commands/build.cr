@@ -170,7 +170,7 @@ module Zane::Commands
       args = ["--build", path.to_s]
       args.push("--target", target) if target
       args << "--optimize"
-      links = g.link_flags(target || Target::HOST, compiler, hashes: true)
+      links = with_write_backs(flags, path, g) { |places| g.link_flags(target || Target::HOST, compiler, hashes: true, write_backs: places) }
       summary = "Compiled #{what}, optimized"
       summary += ", with its dependencies' code compiled from source to inline it" unless g.linked.empty?
       Progress.current.run("Compiling #{what}, optimized", summary, @output, diagnostics) do |output, error|
@@ -187,7 +187,7 @@ module Zane::Commands
     private def build_and_run(what : String, flags : Array(String), g : Graph, path : Path, args : Array(String)) : Int32
       Dir.mkdir_p(path.parent)
       compiler = self.compiler
-      links = g.link_flags(Target::HOST, compiler, hashes: false)
+      links = with_write_backs(flags, path, g) { |places| g.link_flags(Target::HOST, compiler, hashes: false, write_backs: places) }
       library = tier_library(path)
       tier1 = compiler.start(["--tier-up", library.to_s] + flags)
       begin
@@ -201,6 +201,29 @@ module Zane::Commands
       ensure
         tier1.terminate unless tier1.terminated?
         tier1.wait
+      end
+    end
+
+    # Yields the file of the places the program *flags* builds writes back
+    # into, in `out/write-backs/`, named after the program at *path*, the
+    # directory it is built into and a random part of its own, so builds
+    # that overlap never read each other's, for its dependencies compiled from
+    # source to be compiled for it alone (compiler docs/design/lowering.md
+    # §9, "Snapshots"). Nil when the compiler cannot write it, as for a
+    # program it refuses, which the build itself then reports; its
+    # dependencies are then compiled for any program. Nil too, and nothing
+    # run, when *g* compiles no dependency for the program. The file is
+    # removed once the block, which compiles them, is done.
+    private def with_write_backs(flags : Array(String), path : Path, g : Graph, & : Path? -> T) : T forall T
+      return yield nil unless g.compiled_for_program?
+      dir = workspace.out_dir / "write-backs"
+      Dir.mkdir_p(dir)
+      file = dir / "#{path.parent.basename}-#{path.basename}-#{Random::Secure.hex(8)}"
+      begin
+        quiet = IO::Memory.new
+        yield(compiler.run(["--write-backs", file.to_s] + flags, quiet, quiet) == 0 ? file : nil)
+      ensure
+        File.delete?(file)
       end
     end
 
