@@ -485,7 +485,7 @@ module Zane
           cached << p if hit
           files
         in .source?
-          files, hit = entry.not_nil!.compiled(p.commit, target, @workspace.toolchain, places) { |dest| compile(p, target, compiler, dest, write_backs) }
+          files, hit = entry.not_nil!.compiled(p.commit, target, @workspace.toolchain, places) { |dest| compile(p, target, compiler, dest, write_backs, optimize: true) }
           cached << p if hit
           files
         in .path?
@@ -519,10 +519,15 @@ module Zane
     # *dest*, named with its stamp, against the versions its own manifest
     # pins (compiler docs/design/separate-compilation.md C1, C6), for the
     # program that writes back into the places of *write_backs*, when given.
-    private def compile(package : Package, target : String, compiler : Compiler, dest : Path, write_backs : Path?) : Nil
+    # With *optimize*, as for a `source` dependency, whose object the cache
+    # keeps, the object is optimized: the code a program runs wherever it
+    # calls the dependency without inlining it. A path dependency, compiled
+    # again on every build, is not, so a build stays quick while it changes.
+    private def compile(package : Package, target : String, compiler : Compiler, dest : Path, write_backs : Path?, optimize : Bool = false) : Nil
       closure = [] of Package
       gather(package, closure)
       args = compiler.root_flags(false) + ["--object", dest.to_s]
+      args << "--optimize" if optimize
       args.push("--program-write-backs", write_backs.to_s) if write_backs
       args.push("--target", target) unless target == Target::HOST
       ([package] + closure).each do |p|
