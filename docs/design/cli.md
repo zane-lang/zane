@@ -244,7 +244,7 @@ These and `zane toolchain update` (§4) are the only commands that write
 | `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. `dev off` refuses, as `add` does, a release that publishes no prebuilt objects. |
 | `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
 | `zane rename <key> <package> <name>` / `zane rename off <key> <package>` | Writes the `renames` row that has the project import the key's package by the name, replacing the package's row if it has one, or drops the package when the name is `_`; `rename off` removes the row ([`dependencies.md` §2.1, §2.3, §8](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#8-importing-a-dependencys-packages)). The name is a package name that is neither `test` nor the package's own; the package must be a public library package of the version the key pins, and the rows must not drop every one. The changed graph is resolved before the file is written, so a name that would clash with another package the project imports is refused, and so is a `rename off` that would bring one back. `off` is the first argument only while the project has no dependency of that key; `zane rename <key> <package> <package>`, naming the package's own name, removes the row too, whatever the keys are. |
-| `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. |
+| `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. It links no program, so it compiles a `source` dependency for any program; a build compiles it again for the program it links into, which needs nothing online (§3). |
 | `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, public library packages, URL and where its code comes from; a package its dependent's `renames` rows rename is shown as `math as twoMath`, and one they drop as `extra dropped`. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
 
 `update`, `dev` and `rename` apply to a `test-deps` key as to a `deps` key. `add`, `update`,
@@ -307,7 +307,21 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   ([§12.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#121-source-compilation-is-explicit-opt-in)).
   `build-from-source/<target>.coda` records the commit, target and compiler
   pin it was compiled with, and the object is reused only while all four
-  match. A path dependency is compiled the same way on every build, into the
+  match, and, for one compiled for a program, the hash below. Before a program or test is linked, `zanec --write-backs` writes
+  the file of the places its spawned calls write back into, into
+  `out/write-backs/`, and each `source` and path dependency is compiled for that
+  program alone with `--program-write-backs`, so its reads of every other
+  place are plain loads rather than snapshots (compiler
+  [`lowering.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/lowering.md)
+  §9, "Snapshots"). Such an object is kept in
+  `build-from-source/<target>.<places>/`, `<places>` being the first 16
+  digits of the file's SHA-256, with `<target>.<places>.coda` recording the
+  whole hash too, so it is reused only for programs that write back into the
+  same places: programs that write back into none all write one file, and
+  share one object. When the compiler cannot write the
+  file, as for a program it refuses, and while remapping moves what the
+  objects name, which those places do not follow, a dependency is compiled
+  for any program, into `build-from-source/<target>/`. A path dependency is compiled the same way on every build, into the
   project's `out/deps/<target>/`, emptied first so it holds only that
   build's files, and never enters the cache
   ([§12.2](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#122-local-path-dependencies)).
@@ -460,6 +474,14 @@ which only `zane` reads off the directories, so the contract is:
   each is as much the package's as the object is.
   `zane release` packs the first (§4), and a dependency compiled from source
   or a path is the second (§3.1).
+- **`--write-backs OUT`**, given a program's or a test's flags, writes the
+  file of the places its spawned calls write back into, and
+  **`--program-write-backs FILE`**, given with `--no-root --object OUT`,
+  builds a dependency's object for that program alone, its reads of every
+  other place plain loads rather than snapshots (compiler
+  [`lowering.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/lowering.md)
+  §9, "Snapshots"). A compiler that refuses `--write-backs`, one released
+  before it, builds every dependency for any program, as §3 says.
 - **`--rewrite STAMP INPUT OUTPUT`** writes the object `INPUT` with every `!`
   in its symbols replaced by `STAMP`, for ELF, Mach-O and COFF objects, and
   a file of C module hashes with every `!` of its packages replaced so. It is

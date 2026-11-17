@@ -10,7 +10,7 @@ FAKE_ZANEC = begin
 end
 
 # The variables a project example sets, restored after it.
-PROJECT_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS FAKE_PROGRAM_TIER FAKE_TIER_HANG)
+PROJECT_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS FAKE_PROGRAM_TIER FAKE_TIER_HANG FAKE_WRITE_BACKS FAKE_NO_WRITE_BACKS)
 
 # Where tier 1 of a program built into *path* goes (Commands::ProjectCommand#tier_library).
 TIER = {{ flag?(:win32) ? ".dll" : flag?(:darwin) ? ".dylib" : ".so" }}

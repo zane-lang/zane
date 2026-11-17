@@ -26,6 +26,11 @@ module Zane
   #                             file of its C modules' hashes
   #   build-from-source/<target>.coda
   #                             what it was compiled from, and with
+  #   build-from-source/<target>.<places>/, <target>.<places>.coda
+  #                             the same, compiled for the programs that
+  #                             write back into one set of places, the hash
+  #                             of their file (compiler docs/design/
+  #                             lowering.md §9, "Snapshots")
   # ```
   #
   # Each part is made beside where it goes and renamed into place once it is
@@ -139,20 +144,25 @@ module Zane
     # dependency compiled from source (§12.1), with what the compiler wrote
     # beside it. It is kept apart from the release's objects, and reused
     # only while it was compiled from the same commit by the same compiler
-    # pin, *toolchain*. The block compiles it to the path it is given. The
-    # second value says whether the cache already held it.
-    def compiled(commit : String, target : String, toolchain : {String, String}, & : Path ->) : {Array(Path), Bool}
+    # pin, *toolchain*. An object compiled for the programs that write back
+    # into the places whose file hashes to *places* is kept apart from one
+    # compiled for any program, and from one for other places. The block
+    # compiles it to the path it is given. The second value says whether
+    # the cache already held it.
+    def compiled(commit : String, target : String, toolchain : {String, String}, places : String? = nil, & : Path ->) : {Array(Path), Bool}
       dir = @dir / "build-from-source"
-      built = dir / target
+      slot = places ? "#{target}.#{places[0, 16]}" : target
+      built = dir / slot
       object = built / "package.o"
-      record = dir / "#{target}.coda"
+      record = dir / "#{slot}.coda"
       wanted = {"commit" => commit, "target" => target,
                 "zane-version" => toolchain[0], "zane-commit" => toolchain[1]}
+      wanted["write-backs"] = places if places
       return {files(built), true} if File.file?(object) && read_record(record) == wanted
 
       source(commit)
       Dir.mkdir_p(dir)
-      partial = dir / ".#{target}.#{Random::Secure.hex(4)}"
+      partial = dir / ".#{slot}.#{Random::Secure.hex(4)}"
       Dir.mkdir(partial)
       progress = Progress.current
       progress.step("Compiling #{name} from source for #{target}")

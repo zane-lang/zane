@@ -11,7 +11,10 @@ require "json"
 # `--tier-up OUT` it writes OUT once it has logged, unless `FAKE_TIER_HANG`
 # is set, when it never finishes. For `--compile-commands OUT` it writes a
 # database of each `.c` file directly in a `--package` directory, whose
-# arguments name `FAKE_FFI_DIR` with `-isystem`.
+# arguments name `FAKE_FFI_DIR` with `-isystem`. For `--write-backs OUT` it
+# writes `FAKE_WRITE_BACKS` to OUT, or a file naming no place when that is
+# unset, and with `FAKE_NO_WRITE_BACKS` set exits with 2, as a compiler
+# that has no such flag does.
 # Run as that program, it prints its arguments and exits with
 # `FAKE_PROGRAM_STATUS`. With `FAKE_PROGRAM_TIER` set it first waits for the
 # file `ZANE_TIER_UP` names, and writes that name to `FAKE_PROGRAM_TIER`.
@@ -35,6 +38,10 @@ elsif ARGV.includes?("--package")
   if status != 0
     STDERR.puts "fake compiler error"
     exit status
+  end
+  if i = ARGV.index("--write-backs")
+    exit 2 if ENV["FAKE_NO_WRITE_BACKS"]?
+    File.write(ARGV[i + 1], ENV.fetch("FAKE_WRITE_BACKS", "zanec write-backs 1\n"))
   end
   if i = ARGV.index("--build")
     File.copy(Process.executable_path.not_nil!, ARGV[i + 1])

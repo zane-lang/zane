@@ -8,6 +8,7 @@ require "./layout"
 require "./manifest"
 require "./package_url"
 require "./progress"
+require "./sha256"
 require "./remap"
 require "./target"
 require "./workspace"
@@ -431,11 +432,20 @@ module Zane
       file.basename.ends_with?(HASHES)
     end
 
+    # Whether `objects` compiles a dependency for the program it links into:
+    # one comes from source or a path, and no remapping moves what its
+    # object names.
+    def compiled_for_program? : Bool
+      @chosen.empty? && linked.any? { |p| !p.from.release? }
+    end
+
     # The compiler's flags for *target*'s objects: `--link` for each, and,
     # when *hashes*, `--c-hashes` for each file of C module hashes beside
-    # them, which only an optimized build reads (F13).
-    def link_flags(target : String, compiler : Compiler, hashes : Bool) : Array(String)
-      objects(target, compiler).flat_map do |o|
+    # them, which only an optimized build reads (F13). *write_backs* is the
+    # file of the places the program they link into writes back into, as
+    # `objects` takes it.
+    def link_flags(target : String, compiler : Compiler, hashes : Bool, write_backs : Path? = nil) : Array(String)
+      objects(target, compiler, write_backs).flat_map do |o|
         if Graph.hashes?(o)
           hashes ? ["--c-hashes", o.to_s] : [] of String
         else
@@ -453,11 +463,20 @@ module Zane
     # compiler compares before it inlines the package's C (compiler
     # docs/design/ffi.md F13, F15); it carries no symbols to remap.
     #
+    # A dependency compiled for one program, *write_backs* naming the file
+    # of the places it writes back into, reads every other place plainly
+    # rather than as a snapshot (compiler docs/design/lowering.md §9,
+    # "Snapshots"); its object is cached by that file's hash. Without one,
+    # or while remapping moves what an object names, which those places do
+    # not follow, it is compiled for any program.
+    #
     # The progress display shows each step that does work, and the versions
     # whose objects the cache already held, prebuilt or compiled, in one line.
-    def objects(target : String, compiler : Compiler) : Array(Path)
+    def objects(target : String, compiler : Compiler, write_backs : Path? = nil) : Array(Path)
       progress = Progress.current
       cached = [] of Package
+      write_backs = nil unless @chosen.empty?
+      places = write_backs.try { |f| SHA256.hexdigest(File.read(f)) }
       objects = linked.flat_map do |p|
         entry = p.entry
         case p.from
@@ -466,7 +485,7 @@ module Zane
           cached << p if hit
           files
         in .source?
-          files, hit = entry.not_nil!.compiled(p.commit, target, @workspace.toolchain) { |dest| compile(p, target, compiler, dest) }
+          files, hit = entry.not_nil!.compiled(p.commit, target, @workspace.toolchain, places) { |dest| compile(p, target, compiler, dest, write_backs) }
           cached << p if hit
           files
         in .path?
@@ -475,7 +494,7 @@ module Zane
           FileUtils.rm_rf(dest.parent)
           Dir.mkdir_p(dest.parent)
           progress.step("Compiling #{p.key} from #{p.layout.root} for #{target}")
-          compile(p, target, compiler, dest)
+          compile(p, target, compiler, dest, write_backs)
           progress.done("Compiled #{p.key} from #{p.layout.root} for #{target}")
           Dir.children(dest.parent).sort.map { |n| dest.parent / n }.select { |f| File.file?(f) }
         end
@@ -498,11 +517,13 @@ module Zane
 
     # Compiles *package*'s library packages on their own into the object
     # *dest*, named with its stamp, against the versions its own manifest
-    # pins (compiler docs/design/separate-compilation.md C1, C6).
-    private def compile(package : Package, target : String, compiler : Compiler, dest : Path) : Nil
+    # pins (compiler docs/design/separate-compilation.md C1, C6), for the
+    # program that writes back into the places of *write_backs*, when given.
+    private def compile(package : Package, target : String, compiler : Compiler, dest : Path, write_backs : Path?) : Nil
       closure = [] of Package
       gather(package, closure)
       args = compiler.root_flags(false) + ["--object", dest.to_s]
+      args.push("--program-write-backs", write_backs.to_s) if write_backs
       args.push("--target", target) unless target == Target::HOST
       ([package] + closure).each do |p|
         p.layout.libs.each { |l| args.push("--package", "#{p.id(l)}=#{l.dir}") }

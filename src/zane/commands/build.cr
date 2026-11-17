@@ -170,7 +170,7 @@ module Zane::Commands
       args = ["--build", path.to_s]
       args.push("--target", target) if target
       args << "--optimize"
-      links = g.link_flags(target || Target::HOST, compiler, hashes: true)
+      links = g.link_flags(target || Target::HOST, compiler, hashes: true, write_backs: write_backs(flags, path, g))
       summary = "Compiled #{what}, optimized"
       summary += ", with its dependencies' code compiled from source to inline it" unless g.linked.empty?
       Progress.current.run("Compiling #{what}, optimized", summary, @output, diagnostics) do |output, error|
@@ -187,7 +187,7 @@ module Zane::Commands
     private def build_and_run(what : String, flags : Array(String), g : Graph, path : Path, args : Array(String)) : Int32
       Dir.mkdir_p(path.parent)
       compiler = self.compiler
-      links = g.link_flags(Target::HOST, compiler, hashes: false)
+      links = g.link_flags(Target::HOST, compiler, hashes: false, write_backs: write_backs(flags, path, g))
       library = tier_library(path)
       tier1 = compiler.start(["--tier-up", library.to_s] + flags)
       begin
@@ -202,6 +202,23 @@ module Zane::Commands
         tier1.terminate unless tier1.terminated?
         tier1.wait
       end
+    end
+
+    # The file of the places the program *flags* builds writes back into,
+    # in `out/write-backs/`, named after the program at *path* and the
+    # directory it is built into, for its dependencies compiled from
+    # source to be compiled for it alone (compiler docs/design/lowering.md
+    # §9, "Snapshots"). Nil when the compiler cannot write it, as for a
+    # program it refuses, which the build itself then reports; its
+    # dependencies are then compiled for any program. Nil too, and nothing
+    # run, when *g* compiles no dependency for the program.
+    private def write_backs(flags : Array(String), path : Path, g : Graph) : Path?
+      return nil unless g.compiled_for_program?
+      dir = workspace.out_dir / "write-backs"
+      Dir.mkdir_p(dir)
+      file = dir / "#{path.parent.basename}-#{path.basename}"
+      quiet = IO::Memory.new
+      compiler.run(["--write-backs", file.to_s] + flags, quiet, quiet) == 0 ? file : nil
     end
 
     # Where tier 1 of the program at *path* goes: a library beside it, named
