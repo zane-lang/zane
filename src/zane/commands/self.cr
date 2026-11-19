@@ -16,7 +16,7 @@ module Zane::Commands
       0
     end
 
-    # Says on *output* what the update did.
+    # Prints on *output* the result of the update.
     def self.describe(result : SelfUpdate::Result, output : IO) : Nil
       path = result.path
       case result.outcome

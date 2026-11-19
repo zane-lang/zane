@@ -9,7 +9,7 @@ require "../project"
 module Zane::Commands
   # `zane init [dir]`: creates a project (docs/design/cli.md §2.1).
   class Init
-    # What the project starts with: a library package with a test package
+    # The packages the project starts with: a library package with a test package
     # for it, or a program package (spec packages.md §2.1).
     enum Start
       Library

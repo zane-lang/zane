@@ -82,7 +82,8 @@ module Zane::Commands
     end
 
     # A compiler tag that now points to another commit than the lock pins has
-    # moved, which is trusted only when asked (spec dependencies.md §4, §14).
+    # moved, which `zane` accepts only with `--accept-tag-move` (spec
+    # dependencies.md §4, §14).
     private def check_tag_move(release : CompilerRelease, locked : String) : Nil
       return if @accept_tag_move || same_commit?(release.commit, locked)
       raise UserError.new("security error: #{CompilerRelease::URL} tag #{release.tag} is commit #{release.commit}, " \

@@ -153,8 +153,8 @@ module Zane::Commands
 
     # Once any `--import` is given, each package imports through its keys
     # alone (compiler docs/design/separate-compilation.md C10). A build
-    # whose packages import nothing gives the first its own name, so it is
-    # still held to its keys.
+    # whose packages import nothing gives the first package its own name as its
+    # key, so the package is still held to its keys.
     private def keyed(flags : Array(String), id : String, name : String) : Array(String)
       flags.includes?("--import") ? flags : flags + ["--import", "#{id}:#{name}=#{id}"]
     end
@@ -163,8 +163,8 @@ module Zane::Commands
     # linking *g*'s objects, and returns the compiler's exit status. *what*
     # names the package built, such as `bin/app/`. An optimized build also
     # compiles the dependencies' code it reaches from their source, to inline
-    # it (compiler docs/design/separate-compilation.md C12), and the build's step
-    # reports this.
+    # it (compiler docs/design/separate-compilation.md C12), and the build's
+    # step reports this.
     private def build(what : String, flags : Array(String), g : Graph, target : String?, path : Path) : Int32
       Dir.mkdir_p(path.parent)
       args = ["--build", path.to_s]
@@ -229,8 +229,8 @@ module Zane::Commands
 
     # Where tier 1 of the program at *path* goes: a library beside it, named
     # as the host names one. What an earlier build left there is removed
-    # first, so the program never loads a library of another build, and
-    # nor what a stopped build left half made.
+    # first, so the program never loads a library of another build, or
+    # one a stopped build left half made.
     private def tier_library(path : Path) : Path
       extension = {% if flag?(:win32) %} ".dll" {% elsif flag?(:darwin) %} ".dylib" {% else %} ".so" {% end %}
       library = path.parent / "#{path.basename(".exe")}.tier1#{extension}"
@@ -410,8 +410,8 @@ module Zane::Commands
   end
 
   # `zane test [TEST] [-- ARGS]` (§2.5): runs each test package, or only the
-  # test package named as its directory under `test/` names it, as `run` runs a program
-  # (`build_and_run`), into `out/test/`, with *ARGS*. Each test package is
+  # test package named by its directory under `test/`, as `run` runs a
+  # program (`build_and_run`), into `out/test/`, with *ARGS*. Each test package is
   # the root of its own build (spec packages.md §7.2). It exits with the
   # status of the test package it ran, or 1 when any of several failed.
   class Test < ProjectCommand
