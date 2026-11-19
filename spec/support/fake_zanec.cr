@@ -1,23 +1,29 @@
 require "json"
 
-# Stands in for `zanec` in the specs. `--rewrite STAMP INPUT OUTPUT` writes
-# the stamp's line followed by the input, and `--remap FROM TO INPUT OUTPUT`
-# a line naming both stamps followed by the input. As a compiler (any run
-# given `--package`) it appends its arguments to the file `FAKE_ZANEC_LOG`
-# names, exits with `FAKE_ZANEC_STATUS`, for `--build OUT` copies itself to
-# OUT, and for `--object OUT` writes its arguments to OUT, and with
-# `FAKE_ZANEC_C` set, writes beside it what a package's C adds: `STEM.c.0.o`
-# and `STEM.c.hashes`. For
-# `--tier-up OUT` it writes OUT once it has logged, unless `FAKE_TIER_HANG`
-# is set, when it never finishes. For `--compile-commands OUT` it writes a
-# database of each `.c` file directly in a `--package` directory, whose
-# arguments name `FAKE_FFI_DIR` with `-isystem`. For `--write-backs OUT` it
-# writes `FAKE_WRITE_BACKS` to OUT, or a file naming no place when that is
-# unset, and with `FAKE_NO_WRITE_BACKS` set exits with 2, as a compiler
-# that has no such flag does.
-# Run as that program, it prints its arguments and exits with
-# `FAKE_PROGRAM_STATUS`. With `FAKE_PROGRAM_TIER` set it first waits for the
-# file `ZANE_TIER_UP` names, and writes that name to `FAKE_PROGRAM_TIER`.
+# Stands in for `zanec` in the specs.
+# - `--rewrite STAMP INPUT OUTPUT` writes the stamp's line followed by the
+#   input.
+# - `--remap FROM TO INPUT OUTPUT` writes a line naming both stamps followed
+#   by the input.
+# - Run as a compiler (any run given `--package`), it appends its arguments
+#   to the file `FAKE_ZANEC_LOG` names and exits with `FAKE_ZANEC_STATUS`.
+#   Besides that:
+#   - `--build OUT` copies the fake compiler itself to OUT.
+#   - `--object OUT` writes its arguments to OUT. With `FAKE_ZANEC_C` set, it
+#     also writes beside OUT what a package's C adds: `STEM.c.0.o` and
+#     `STEM.c.hashes`.
+#   - `--tier-up OUT` writes OUT once it has logged, unless `FAKE_TIER_HANG`
+#     is set, in which case it never finishes.
+#   - `--compile-commands OUT` writes a database of each `.c` file directly in
+#     a `--package` directory, whose arguments name `FAKE_FFI_DIR` with
+#     `-isystem`.
+#   - `--write-backs OUT` writes `FAKE_WRITE_BACKS` to OUT, or a file naming no
+#     place when that is unset. With `FAKE_NO_WRITE_BACKS` set, it exits with
+#     2, as a compiler that has no such flag does.
+# - Run as the program that `--build` produced, it prints its arguments and
+#   exits with `FAKE_PROGRAM_STATUS`. With `FAKE_PROGRAM_TIER` set, it first
+#   waits for the file `ZANE_TIER_UP` names, and writes that name to
+#   `FAKE_PROGRAM_TIER`.
 if ARGV.first? == "--rewrite"
   if log = ENV["FAKE_ZANEC_LOG"]?
     File.open(log, "a") { |f| f.puts ARGV.join(" ") }

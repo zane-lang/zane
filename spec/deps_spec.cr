@@ -54,7 +54,7 @@ private class Registry
     Zane::PackageUrl.parse(url(name)).stamp(tag)
   end
 
-  # What the compiler knows the version by: its stamp and name.
+  # The stamp and name by which the compiler knows the version.
   def id(name : String, tag : String) : String
     "#{stamp(name, tag)}#{name}"
   end
@@ -237,7 +237,7 @@ end
 # object compiled for such a program is kept in.
 NO_PLACES = "zanec write-backs 1\n"
 
-# What the host's executables are named with.
+# The suffix the host's executables carry in their file names.
 private def program_suffix : String
   {{ flag?(:win32) ? ".exe" : "" }}
 end
