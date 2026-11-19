@@ -2,7 +2,7 @@ require "./errors"
 
 # SHA-256 (FIPS 180-4) in Crystal, so the binary needs no OpenSSL. Every
 # archive a fetch downloads is checked against the hash its library committed
-# (spec dependencies.md §5), so this is the one cryptographic primitive the
+# (spec dependencies.md §5), so SHA-256 is the only cryptographic primitive the
 # command needs.
 class Zane::SHA256
   K = StaticArray[

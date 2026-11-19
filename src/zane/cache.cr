@@ -147,8 +147,8 @@ module Zane
     # compiler pin, *toolchain*. An object compiled for the programs that
     # write back into the places whose file hashes to *places* is kept apart
     # from one compiled for any program, and from one for other places. The block
-    # compiles it to the path it is given. The second value says whether
-    # the cache already held it.
+    # compiles the object to the path it is given. The second value is true
+    # when the cache already held the object.
     def compiled(commit : String, target : String, toolchain : {String, String}, places : String? = nil, & : Path ->) : {Array(Path), Bool}
       dir = @dir / "build-from-source"
       slot = places ? "#{target}.#{places[0, 16]}" : target

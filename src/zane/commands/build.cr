@@ -13,7 +13,7 @@ require "../target"
 require "../workspace"
 
 module Zane::Commands
-  # What resolving the graph has to say. A URL in `remaps` that names no
+  # The warnings resolving the graph produces. A URL in `remaps` that names no
   # package of the graph is likely a typo or left from a removed dependency,
   # so it is pointed out, but changes nothing (spec dependencies.md §2.1).
   def self.report(graph : Graph, error : IO) : Nil
@@ -163,8 +163,8 @@ module Zane::Commands
     # linking *g*'s objects, and returns the compiler's exit status. *what*
     # names the package built, such as `bin/app/`. An optimized build also
     # compiles the dependencies' code it reaches from their source, to inline
-    # it (compiler docs/design/separate-compilation.md C12), which its step
-    # says.
+    # it (compiler docs/design/separate-compilation.md C12), and the build's step
+    # reports this.
     private def build(what : String, flags : Array(String), g : Graph, target : String?, path : Path) : Int32
       Dir.mkdir_p(path.parent)
       args = ["--build", path.to_s]
@@ -246,7 +246,7 @@ module Zane::Commands
       workspace.out_dir / dir / (windows ? "#{name}.exe" : name)
     end
 
-    # The program packages *name* picks: the one it names, or every one.
+    # The program packages *name* picks: the program it names, or every program.
     private def programs(name : String?) : Array(Layout::Program)
       all = layout.programs
       if all.empty?
@@ -339,7 +339,7 @@ module Zane::Commands
   end
 
   # `zane build [PROGRAM] [--target T] [-o OUT]` (§2.3): every program
-  # package, or the one named.
+  # package, or only the program you name.
   class Build < ProjectCommand
     @target : String? = nil
     @path : Path? = nil
@@ -409,11 +409,11 @@ module Zane::Commands
     end
   end
 
-  # `zane test [TEST] [-- ARGS]` (§2.5): runs each test package, or the one
-  # named as its directory under `test/` names it, as `run` runs a program
+  # `zane test [TEST] [-- ARGS]` (§2.5): runs each test package, or only the
+  # test package named as its directory under `test/` names it, as `run` runs a program
   # (`build_and_run`), into `out/test/`, with *ARGS*. Each test package is
   # the root of its own build (spec packages.md §7.2). It exits with the
-  # status of the one test it ran, or 1 when any of several failed.
+  # status of the test package it ran, or 1 when any of several failed.
   class Test < ProjectCommand
     @program_args = [] of String
     @test : String? = nil

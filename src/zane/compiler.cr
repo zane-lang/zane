@@ -13,7 +13,7 @@ module Zane
     def initialize(@path : String)
     end
 
-    # The flag that says whether a build has a root package: a program's or
+    # The flag that marks whether a build has a root package: a program's or
     # a test's build has one, a library build has none (spec packages.md
     # §6.1).
     def root_flags(root : Bool) : Array(String)

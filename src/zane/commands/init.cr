@@ -33,7 +33,7 @@ module Zane::Commands
     @git = true
     @yes = false
 
-    # *interactive* says whether questions may be asked; it is false when
+    # *interactive* is true when questions may be asked, and false when
     # standard input is not a terminal. *compiler_url* is where releases are
     # looked up and *toolchains* where they are installed; tests change both.
     def initialize(args : Array(String), @input : IO, @output : IO, @interactive : Bool,

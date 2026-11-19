@@ -15,7 +15,7 @@ module Zane::Toolchain
 
   # The platform a compiler release names its archive for, as
   # zane-lang/compiler's dev/release/ packagers do: AArch64 is `aarch64`
-  # there, where this CLI's own binaries say `arm64` (SelfUpdate).
+  # there, where this CLI's own binaries are named `arm64` (SelfUpdate).
   def self.host : String
     {% if flag?(:win32) %}
       "windows-x86_64"

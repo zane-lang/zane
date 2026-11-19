@@ -84,7 +84,7 @@ module Zane
 
     # Makes a display for *output* the current one while the block runs, and
     # yields it. The step still running when the block returns is marked
-    # done, and the one it raised in is marked failed. Inside a display for
+    # done, and the step in which the block raised is marked failed. Inside a display for
     # the same *output*, it yields that one.
     def self.run(output : IO, & : Progress -> T) : T forall T
       outer = @@current
@@ -103,7 +103,7 @@ module Zane
       result
     end
 
-    # Starts the step *label*, marking the one before it done. A *total* and
+    # Starts the step *label*, marking the previous step done. A *total* and
     # a *meter* draw a progress bar; a meter alone shows the amount and rate.
     # The meter counts bytes, or *unit*s, such as "objects", when given.
     def step(label : String, total : Int64? = nil, unit : String? = nil, &meter : -> Int64) : Nil

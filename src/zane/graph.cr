@@ -53,7 +53,7 @@ module Zane
 
     # A dependency as a package's manifest records it: the key it names the
     # package by, and the version it pins. *owner* is that manifest, whose
-    # `renames` rows say what its packages import the dependency's packages
+    # `renames` rows give the names its packages import the dependency's packages
     # by (spec dependencies.md §2.1, §8).
     record Edge, key : String, package : Package, owner : Manifest do
       # The name *library* of the package is imported by along this edge,
@@ -302,7 +302,7 @@ module Zane
     end
 
     # Collapses the versions of each package the project lists in `remaps`
-    # that their patterns say are interchangeable (§15.3).
+    # whose patterns make them interchangeable (§15.3).
     private def remap : Nil
       listed = @workspace.manifest.remaps.map { |u| PackageUrl.parse(u).normalized }
       @packages.group_by(&.url.normalized).each do |url, versions|
@@ -499,7 +499,7 @@ module Zane
           Dir.children(dest.parent).sort.map { |n| dest.parent / n }.select { |f| File.file?(f) }
         end
       end
-      # A command that builds several packages, such as `test`, says it once.
+      # A command that builds several packages, such as `test`, notes the cached versions only once.
       if !cached.empty? && @noted.add?(target)
         progress.note(Graph.from_cache(cached.map { |p| {p.key, p.tag} }, target))
       end

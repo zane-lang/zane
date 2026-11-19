@@ -160,7 +160,7 @@ module Zane::Commands
 
   # `zane add <url> [tag] [--as key] [--from-source] [--test]` (§3): pins a
   # project, fetches it, and records it in both of the project's files, in
-  # `test-deps` when *--test* says only the test packages import it.
+  # `test-deps` when *--test* is given, because only the test packages import it.
   class Add < EditCommand
     @key : String? = nil
     @from_source = false

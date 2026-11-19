@@ -218,7 +218,7 @@ module Zane
     end
 
     # The name the project imports *package* of the dependency *key* by:
-    # its own, the one a `renames` row gives it, or nil when a row drops it.
+    # its own, the name a `renames` row gives it, or nil when a row drops it.
     def import_name(key : String, package : String) : String?
       rename = @renames.find { |r| r.dependency == key && r.package == package }
       return package unless rename

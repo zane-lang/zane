@@ -6,7 +6,7 @@ require "./project"
 
 module Zane
   # A project on disk: the directory holding its `zane.coda`, and what the
-  # manifest says a build needs.
+  # manifest declares that a build needs.
   record Workspace, manifest : Manifest do
     MANIFEST = Manifest::FILE
 
