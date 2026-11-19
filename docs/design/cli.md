@@ -107,16 +107,16 @@ terminal, `init` asks nothing: it uses the flags and defaults, and fails if a
 default cannot be worked out.
 
 The project is pinned to the newest compiler installed (§4.1), so `init` works
-offline, or to the compiler `--zane-version` names, when that compiler is installed. Its
-tag becomes `zane-version`, and the commit its toolchain record names becomes
-the lock file's `zane-commit`.
+offline, or to the compiler `--zane-version` names, when that compiler is
+installed. Its tag becomes `zane-version`, and the commit its toolchain record
+names becomes the lock file's `zane-commit`.
 
 With no compiler installed, or not the one named, `init` looks the release up
 online instead, by listing the tags of `zane-lang/compiler` with
 `git ls-remote`, so it needs no API access: the highest `vMAJOR.MINOR` tag, or
-the tag `--zane-version` names, becomes `zane-version`, and the commit it points to becomes
-`zane-commit`. With no release published, `init` fails. Either way, it says
-which compiler it pinned and where it found it.
+the tag `--zane-version` names, becomes `zane-version`, and the commit that tag
+points to becomes `zane-commit`. With no release published, `init` fails.
+Either way, `init` reports which compiler it pinned and where it found it.
 
 `init` writes nothing until every question is answered, so cancelling leaves the
 directory untouched. It then writes:
@@ -164,10 +164,10 @@ mirrors no subpackage, and the names a project keeps apart.
 
 Resolves and fetches dependencies
 ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)),
-then has `zanec` compile and link every program package in `bin/`, or only the program you
-name. Each goes to `out/<target>/<name>`, with `out/host/<name>` when no
-target is given, and `-o` names the file when one program is built. The
-program is optimized. `T` is a target triple, spelled as `zig cc` reads it,
+then has `zanec` compile and link every program package in `bin/`, or only
+the program you name. Each goes to `out/<target>/<name>`, with
+`out/host/<name>` when no target is given, and `-o` names the file when one
+program is built. The program is optimized. `T` is a target triple, spelled as `zig cc` reads it,
 such as `x86_64-windows-gnu`
 ([compiler `platforms.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/platforms.md)),
 and defaults to the host, which `zane` names the same way: `x86_64-linux-gnu`,
@@ -190,9 +190,9 @@ range the target system permits. A dependency's manifest cannot set either
 ### 2.4 `zane run [PROGRAM] [-- ARGS]`
 
 Builds a program package for the host into `out/run/<name>`, then runs it with
-`ARGS` and exits with its status. A project with several programs needs the
-program to run named. The build `run` uses is the one that gives the program's result soonest,
-counting the build and the run together: the compiler's tiered build
+`ARGS` and exits with its status. In a project with several programs, you name
+the program to run. `run` uses the build that gives the program's result
+soonest, counting the build and the run together: the compiler's tiered build
 ([compiler `tiers.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/tiers.md)).
 `zane` starts the optimized build, tier 1, in the background, builds the
 unoptimized one, tier 0, and runs it as soon as it is linked, with
@@ -208,10 +208,10 @@ differs from the program `build` makes.
 
 ### 2.5 `zane test [TEST] [-- ARGS]`
 
-Builds every test package in `test/`, or only the test package named by its directory under
-`test/`, such as `gui/opengl`, for the host into `out/test/`, and runs each
-with `ARGS`, each built and run as `run` builds and runs a program, so the
-two never differ. Each test package is the root of its
+Builds every test package in `test/`, or only the test package named by its
+directory under `test/`, such as `gui/opengl`, for the host into `out/test/`,
+and runs each with `ARGS`, each built and run as `run` builds and runs a
+program, so the two never differ. Each test package is the root of its
 own build, and the project's library packages are compiled with it
 ([`packages.md` §7.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#72-each-test-package-is-the-root-of-its-own-test-build)).
 The graph is the project's `deps` and `test-deps` together
@@ -530,7 +530,7 @@ subpackage it tests
 6. **Inspection.** `inspect` and its six views, with `--optimize` and
    `--target` for the views of a build (§4). Built.
 
-`zane` runs the first compiler it finds among these, in this order: the compiler `ZANE_COMPILER` names, the
-toolchain installed for the project's `zane-version` (§4.1), and `zanec` on
-`PATH`. A compiler selected by `ZANE_COMPILER` or `PATH` is not checked against
-the project's pin.
+`zane` runs the first compiler it finds among these, in this order: the
+compiler `ZANE_COMPILER` names, the toolchain installed for the project's
+`zane-version` (§4.1), and `zanec` on `PATH`. A compiler selected by
+`ZANE_COMPILER` or `PATH` is not checked against the project's pin.
