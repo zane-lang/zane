@@ -66,19 +66,20 @@ module Zane
 
     # Rewrites a lock *doc* that pins the compiler with a `zane` row, as
     # locks did before `zane-commit` (docs/design/cli.md §3), into one that
-    # pins it with the field, ahead of the `resolutions` table, keeping the
-    # table's comments and each other row's. Every lock a command writes is
+    # pins it with the field, ahead of the `resolutions` table, keeping every
+    # comment: the old row's goes to the field. Every lock a command writes is
     # then in the current form, so the `zane` row is free for a dependency.
     def self.migrate_lock(doc : Coda::Doc) : Nil
       return if doc.root.has_key?(Manifest::COMPILER_COMMIT)
       old = resolutions(doc)
       pin = old[Manifest::LEGACY_COMPILER_KEY]? || return
-      commit = pin["commit"]
+      commit, note = pin["commit"], pin.comment
       rows = old.reject { |key, _| key == Manifest::LEGACY_COMPILER_KEY }
         .map { |key, row| {key, row.to_h, row.comment} }
       columns, comment, header = old.columns, old.comment, old.header_comment
       doc.root.delete(Manifest::RESOLUTIONS)
       doc.root[Manifest::COMPILER_COMMIT] = commit
+      doc.root[Manifest::COMPILER_COMMIT].comment = note unless note.empty?
       doc.root[Manifest::RESOLUTIONS] = Coda::KeyedTable.new(columns)
       table = resolutions(doc)
       table.comment = comment unless comment.empty?

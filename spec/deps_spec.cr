@@ -1175,10 +1175,11 @@ describe Zane::Manifest do
       File.write(project / "zane.coda", File.read(project / "zane.coda").sub("]", "    math v1.0 release\n]"))
       lock = project / "zane-lock.coda"
       File.write(lock, "# What the project resolved.\nresolutions [\n    key url commit\n" \
+                       "    # Moved to v0.1 by hand.\n" \
                        "    zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567\n" \
                        "    # Trusted by hand.\n    math #{registry.url("math")} #{math}\n]\n")
       zane(["add", registry.url("shapes")], project)[0].should eq 0
-      File.read(lock).should eq "zane-commit 0123456789abcdef0123456789abcdef01234567\n\n" \
+      File.read(lock).should eq "# Moved to v0.1 by hand.\nzane-commit 0123456789abcdef0123456789abcdef01234567\n\n" \
                                 "# What the project resolved.\nresolutions [\n    key url commit\n" \
                                 "    # Trusted by hand.\n    math #{registry.url("math")} #{math}\n" \
                                 "    shapes #{registry.url("shapes")} #{shapes}\n]\n"
