@@ -5,7 +5,7 @@ mode=${1:-check}
 case "$mode" in check|create) ;; *) echo 'usage: release-tag.sh [check|create]' >&2; exit 1 ;; esac
 
 # Listing releases distinguishes an absent release from an API/authentication
-# failure. Publish repeats this with write access, which also exposes drafts.
+# failure. Publish repeats this with write access, and write access also exposes drafts.
 releases=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[].tag_name')
 if grep -Fxq -- "$VERSION" <<< "$releases"; then
     echo "::error::Release $VERSION already exists; finish its draft or choose a new version."

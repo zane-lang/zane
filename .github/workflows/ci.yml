@@ -1,8 +1,9 @@
 name: CI
 
 # Every push to any branch, which covers a pull request from this repository.
-# A pull request from a fork runs on the pull_request event instead; the jobs
-# skip it for one from this repository, which its push already ran.
+# A pull request from a fork runs on the pull_request event instead. The jobs
+# skip the pull_request event for a pull request from this repository,
+# because its push already ran them.
 on:
   push:
   pull_request:
@@ -33,7 +34,7 @@ jobs:
       - run: devbox run -- bash test/release-tag.sh
       - run: devbox run -- shellcheck install.sh test/install.sh .github/scripts/release-tag.sh test/release-tag.sh
 
-  # The Alpine image uses the Crystal version Devbox pins, so both stay in step.
+  # The Alpine image uses the Crystal version Devbox pins, so the image and Devbox use the same Crystal version.
   crystal-version:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
