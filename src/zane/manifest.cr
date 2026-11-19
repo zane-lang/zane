@@ -48,12 +48,6 @@ module Zane
     COMPILER_COMMIT = "zane-commit"
     RESOLUTIONS     = "resolutions"
 
-    # The key of the `resolutions` row that pinned the compiler in a lock
-    # file written before `zane-commit` existed. Such a lock has no
-    # `zane-commit` field, which is how it is told apart: it is still read,
-    # and rewritten with the field whenever a command edits it.
-    LEGACY_COMPILER_KEY = "zane"
-
     DEPS      = "deps"
     TEST_DEPS = "test-deps"
     RENAMES   = "renames"
@@ -232,8 +226,7 @@ module Zane
     end
 
     # The compiler commit and the dependency rows of the lock file in
-    # *root*. A lock without `zane-commit` predates it, and its compiler
-    # commit is the `zane` row's.
+    # *root*.
     private def self.read_lock(root : Path) : {String, Hash(String, Resolution)}
       path = root / LOCK
       raise UserError.new("#{root} holds #{FILE} but no #{LOCK}") unless File.file?(path)
@@ -252,18 +245,13 @@ module Zane
           end
           resolutions[key] = Resolution.new(url, commit)
         end
-        if doc.root.has_key?(COMPILER_COMMIT)
-          commit = doc.root[COMPILER_COMMIT].as?(Coda::StringNode).try(&.value) ||
-                   raise UserError.new("#{path}: `#{COMPILER_COMMIT}` is not a single value")
-          unless COMMIT.matches?(commit)
-            raise UserError.new("#{path}: `#{COMPILER_COMMIT}` is `#{commit}`, which is not a commit hash")
-          end
-          {commit, resolutions}
-        elsif legacy = resolutions.delete(LEGACY_COMPILER_KEY)
-          {legacy.commit, resolutions}
-        else
-          raise UserError.new("#{path} has no `#{COMPILER_COMMIT}` field")
+        node = doc.root[COMPILER_COMMIT]? || raise UserError.new("#{path} has no `#{COMPILER_COMMIT}` field")
+        commit = node.as?(Coda::StringNode).try(&.value) ||
+                 raise UserError.new("#{path}: `#{COMPILER_COMMIT}` is not a single value")
+        unless COMMIT.matches?(commit)
+          raise UserError.new("#{path}: `#{COMPILER_COMMIT}` is `#{commit}`, which is not a commit hash")
         end
+        {commit, resolutions}
       end
     rescue error : Coda::Error
       raise UserError.new("#{path}: #{error.message}")

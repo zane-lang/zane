@@ -17,7 +17,7 @@ module Zane
     # never disagree.
     def self.change(root : Path, manifest : Coda::Doc -> Nil, lock : (Coda::Doc -> Nil)? = nil) : Nil
       edited = edit(root / Manifest::FILE, manifest)
-      locked = lock.try { |l| edit(root / Manifest::LOCK, ->(doc : Coda::Doc) { migrate_lock(doc); l.call(doc) }) }
+      locked = lock.try { |l| edit(root / Manifest::LOCK, l) }
       unless locked
         File.rename(edited, root / Manifest::FILE)
         return
@@ -62,34 +62,6 @@ module Zane
 
     def self.resolutions(doc : Coda::Doc) : Coda::KeyedTable
       doc.root[Manifest::RESOLUTIONS].as_keyed_table
-    end
-
-    # Rewrites a lock *doc* that pins the compiler with a `zane` row, as
-    # locks did before `zane-commit` (docs/design/cli.md §3), into one that
-    # pins it with the field, ahead of the `resolutions` table, keeping every
-    # comment: the old row's goes to the field. Every lock a command writes is
-    # then in the current form, so the `zane` row is free for a dependency.
-    def self.migrate_lock(doc : Coda::Doc) : Nil
-      return if doc.root.has_key?(Manifest::COMPILER_COMMIT)
-      old = resolutions(doc)
-      pin = old[Manifest::LEGACY_COMPILER_KEY]? || return
-      commit, note = pin["commit"], pin.comment
-      rows = old.reject { |key, _| key == Manifest::LEGACY_COMPILER_KEY }
-        .map { |key, row| {key, row.to_h, row.comment} }
-      columns, comment, header = old.columns, old.comment, old.header_comment
-      doc.root.delete(Manifest::RESOLUTIONS)
-      doc.root[Manifest::COMPILER_COMMIT] = commit
-      doc.root[Manifest::COMPILER_COMMIT].comment = note unless note.empty?
-      doc.root[Manifest::RESOLUTIONS] = Coda::KeyedTable.new(columns)
-      table = resolutions(doc)
-      table.comment = comment unless comment.empty?
-      table.header_comment = header unless header.empty?
-      rows.each do |key, values, note|
-        row = Coda::Row.new
-        columns.each { |c| values[c]?.try { |v| row.insert(c, v) } }
-        table[key] = row
-        table[key].comment = note unless note.empty?
-      end
     end
 
     private def self.edit(path : Path, change : Coda::Doc -> Nil) : Path

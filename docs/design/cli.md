@@ -235,11 +235,6 @@ Deletes `out/`.
 These and `zane toolchain update` (§4) are the only commands that write
 `zane.coda` and `zane-lock.coda`, and they always change the two files together
 ([`dependencies.md` §2.3](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#23-files-are-recorded-and-updated-by-commands)).
-`zane` also reads a lock file that pins the compiler with a `zane` row of
-`resolutions`, with no `zane-commit` field, as lock files did before the field
-existed, so packages that published such a lock still resolve. A command that
-writes such a lock rewrites it with `zane-commit` in place of the row, which
-leaves the key `zane` free for a dependency.
 
 | Command | Does |
 |---|---|

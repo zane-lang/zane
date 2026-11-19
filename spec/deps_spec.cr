@@ -447,13 +447,11 @@ describe Zane::Commands::Add do
     end
   end
 
-  it "reads a library whose lock pins the compiler with a `zane` row, as locks did before `zane-commit`" do
+  it "refuses a library whose lock pins the compiler with a `zane` row instead of `zane-commit`" do
     with_registry do |registry, project, _|
       registry.publish("math", "v1.0", legacy_lock: true)
-      registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}], legacy_lock: true)
-      zane(["add", registry.url("shapes")], project)[0].should eq 0
-      zane(["build"], project)[0].should eq 0
-      registry.fetched.size.should eq 2
+      expect_raises(Zane::UserError, "zane-lock.coda has no `zane-commit` field") { zane(["add", registry.url("math")], project) }
+      lock_rows(project).should be_empty
     end
   end
 
@@ -1168,47 +1166,16 @@ describe Zane::Manifest do
     end
   end
 
-  it "keeps a lock's comments when it rewrites its `zane` row as `zane-commit`" do
-    with_registry do |registry, project|
-      math = registry.publish("math", "v1.0")
-      shapes = registry.publish("shapes", "v1.0")
-      File.write(project / "zane.coda", File.read(project / "zane.coda").sub("]", "    math v1.0 release\n]"))
-      lock = project / "zane-lock.coda"
-      File.write(lock, "# What the project resolved.\nresolutions [\n    key url commit\n" \
-                       "    # Moved to v0.1 by hand.\n" \
-                       "    zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567\n" \
-                       "    # Trusted by hand.\n    math #{registry.url("math")} #{math}\n]\n")
-      zane(["add", registry.url("shapes")], project)[0].should eq 0
-      File.read(lock).should eq "# Moved to v0.1 by hand.\nzane-commit 0123456789abcdef0123456789abcdef01234567\n\n" \
-                                "# What the project resolved.\nresolutions [\n    key url commit\n" \
-                                "    # Trusted by hand.\n    math #{registry.url("math")} #{math}\n" \
-                                "    shapes #{registry.url("shapes")} #{shapes}\n]\n"
-    end
-  end
-
-  it "reads the compiler pin from `zane-commit`, and refuses a lock without one" do
+  it "reads the compiler pin from `zane-commit`, and refuses a lock without one, a `zane` row included" do
     with_registry do |_, project|
       lock = project / "zane-lock.coda"
       Zane::Manifest.load(project).zane_commit.should eq "0123456789abcdef0123456789abcdef01234567"
       File.write(lock, "resolutions [\n    key url commit\n]\n")
       expect_raises(Zane::UserError, "zane-lock.coda has no `zane-commit` field") { Zane::Manifest.load(project) }
+      File.write(lock, "resolutions [\n    key url commit\n    zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567\n]\n")
+      expect_raises(Zane::UserError, "zane-lock.coda has no `zane-commit` field") { Zane::Manifest.load(project) }
       File.write(lock, "zane-commit main\n\nresolutions [\n    key url commit\n]\n")
       expect_raises(Zane::UserError, "`zane-commit` is `main`, which is not a commit hash") { Zane::Manifest.load(project) }
-    end
-  end
-
-  it "reads a lock that pins the compiler with a `zane` row, and writes it with `zane-commit` when it next changes" do
-    with_registry do |registry, project|
-      lock = project / "zane-lock.coda"
-      File.write(lock, "resolutions [\n    key url commit\n    zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567\n]\n")
-      manifest = Zane::Manifest.load(project)
-      manifest.zane_commit.should eq "0123456789abcdef0123456789abcdef01234567"
-      manifest.resolutions.should be_empty
-
-      commit = registry.publish("math", "v1.0")
-      zane(["add", registry.url("math")], project)[0].should eq 0
-      File.read(lock).should eq "zane-commit 0123456789abcdef0123456789abcdef01234567\n\n" \
-                                "resolutions [\n    key url commit\n    math #{registry.url("math")} #{commit}\n]\n"
     end
   end
 end
