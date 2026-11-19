@@ -29,8 +29,8 @@ module Zane::Commands
 
   # `zane toolchain update [tag] [--accept-tag-move]` (§4): installs the
   # compiler release named, or else the newest of the project's major, and
-  # moves the project's compiler pin to it, `zane-version` and the `zane` lock
-  # row together.
+  # moves the project's compiler pin to it, `zane-version` and `zane-commit`
+  # together.
   class ToolchainUpdate < EditCommand
     @accept_tag_move = false
 

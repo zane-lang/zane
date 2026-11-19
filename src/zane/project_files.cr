@@ -65,26 +65,29 @@ module Zane
     end
 
     # Rewrites a lock *doc* that pins the compiler with a `zane` row, as
-    # locks did before `zane-commit` (spec dependencies.md §2.2), into one
-    # that pins it with the field, ahead of the `resolutions` table. Every
-    # lock a command writes is then in the current form, so the `zane` row
-    # is free for a dependency.
+    # locks did before `zane-commit` (docs/design/cli.md §3), into one that
+    # pins it with the field, ahead of the `resolutions` table, keeping the
+    # table's comments and each other row's. Every lock a command writes is
+    # then in the current form, so the `zane` row is free for a dependency.
     def self.migrate_lock(doc : Coda::Doc) : Nil
       return if doc.root.has_key?(Manifest::COMPILER_COMMIT)
       old = resolutions(doc)
       pin = old[Manifest::LEGACY_COMPILER_KEY]? || return
       commit = pin["commit"]
       rows = old.reject { |key, _| key == Manifest::LEGACY_COMPILER_KEY }
-        .map { |key, row| {key, row.to_h} }
-      columns = old.columns
+        .map { |key, row| {key, row.to_h, row.comment} }
+      columns, comment, header = old.columns, old.comment, old.header_comment
       doc.root.delete(Manifest::RESOLUTIONS)
       doc.root[Manifest::COMPILER_COMMIT] = commit
-      table = Coda::KeyedTable.new(columns)
-      doc.root[Manifest::RESOLUTIONS] = table
-      rows.each do |key, values|
+      doc.root[Manifest::RESOLUTIONS] = Coda::KeyedTable.new(columns)
+      table = resolutions(doc)
+      table.comment = comment unless comment.empty?
+      table.header_comment = header unless header.empty?
+      rows.each do |key, values, note|
         row = Coda::Row.new
         columns.each { |c| values[c]?.try { |v| row.insert(c, v) } }
         table[key] = row
+        table[key].comment = note unless note.empty?
       end
     end
 

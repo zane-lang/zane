@@ -1168,6 +1168,23 @@ describe Zane::Manifest do
     end
   end
 
+  it "keeps a lock's comments when it rewrites its `zane` row as `zane-commit`" do
+    with_registry do |registry, project|
+      math = registry.publish("math", "v1.0")
+      shapes = registry.publish("shapes", "v1.0")
+      File.write(project / "zane.coda", File.read(project / "zane.coda").sub("]", "    math v1.0 release\n]"))
+      lock = project / "zane-lock.coda"
+      File.write(lock, "# What the project resolved.\nresolutions [\n    key url commit\n" \
+                       "    zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567\n" \
+                       "    # Trusted by hand.\n    math #{registry.url("math")} #{math}\n]\n")
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      File.read(lock).should eq "zane-commit 0123456789abcdef0123456789abcdef01234567\n\n" \
+                                "# What the project resolved.\nresolutions [\n    key url commit\n" \
+                                "    # Trusted by hand.\n    math #{registry.url("math")} #{math}\n" \
+                                "    shapes #{registry.url("shapes")} #{shapes}\n]\n"
+    end
+  end
+
   it "reads the compiler pin from `zane-commit`, and refuses a lock without one" do
     with_registry do |_, project|
       lock = project / "zane-lock.coda"

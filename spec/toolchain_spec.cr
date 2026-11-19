@@ -102,7 +102,7 @@ private def toolchain_command(args : Array(String)) : {Int32, String, String}
 end
 
 # A project in *registry*'s directory pinned to the compiler *tag* at
-# *commit*, with the `deps` rows and lock rows given.
+# *commit*, with the `deps` rows and `resolutions` rows given.
 private def toolchain_project(registry : ToolchainRegistry, tag : String, commit : String,
                               deps = "", rows = "") : Path
   project = registry.dir / "project"
