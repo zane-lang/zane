@@ -34,7 +34,8 @@ jobs:
       - run: devbox run -- bash test/release-tag.sh
       - run: devbox run -- shellcheck install.sh test/install.sh .github/scripts/release-tag.sh test/release-tag.sh
 
-  # The Alpine image uses the Crystal version Devbox pins, so the image and Devbox use the same Crystal version.
+  # The Alpine image uses the Crystal version Devbox pins, so a release is built
+  # with the same Crystal version that Devbox gives development.
   crystal-version:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
