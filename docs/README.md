@@ -2,7 +2,7 @@
 
 How `zane`, the command that creates, builds, runs and tests Zane projects, is designed and released.
 
-To use `zane`, start with the [Learn pages](https://github.com/zane-lang/docs/blob/main/docs/README.md); its commands are listed in the [command reference](https://github.com/zane-lang/docs/blob/main/docs/reference/cli.md). The documents here are for working on `zane` itself, and for anyone who wants to know why it behaves as it does.
+To learn to use `zane`, start with the [Learn pages](https://github.com/zane-lang/docs/blob/main/docs/README.md); the [command reference](https://github.com/zane-lang/docs/blob/main/docs/reference/cli.md) lists every `zane` command. The documents here are for people who work on `zane` itself, or who want to know why `zane` behaves as it does.
 
 ## Design
 

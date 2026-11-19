@@ -50,7 +50,7 @@ module Zane::CLI
   # when *interactive*, which is true when standard input is a terminal.
   def self.run(args : Array(String), stdout : IO = STDOUT, stderr : IO = STDERR,
                stdin : IO = STDIN, interactive : Bool = STDIN.tty?) : Int32
-    # One display shows the slow steps of whichever command runs.
+    # A single progress display shows the slow steps of the command being run.
     Progress.run(stderr) do
       case args.first?
       when nil, "help", "-h", "--help"
