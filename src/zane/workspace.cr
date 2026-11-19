@@ -50,10 +50,10 @@ module Zane
       manifest.zane_version.not_nil!
     end
 
-    # The compiler pin: its tag, and the commit the lock file's `zane` row
-    # names (spec dependencies.md §14).
+    # The compiler pin: its tag, and the commit the lock file's
+    # `zane-commit` names (spec dependencies.md §2.2, §14).
     def toolchain : {String, String}
-      {zane_version, manifest.resolutions[Manifest::COMPILER_KEY].commit}
+      {zane_version, manifest.zane_commit}
     end
 
     # The project's packages, read from its directories and held to their

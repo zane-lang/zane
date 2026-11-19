@@ -191,9 +191,8 @@ module Zane::Commands
       end
 
       Coda::Doc.new do |doc|
-        resolutions = Coda::KeyedTable.new(["url", "commit"])
-        doc.root["resolutions"] = resolutions
-        resolutions["zane"] = Coda::Row.new.insert("url", @compiler_url).insert("commit", release.commit)
+        doc.root[Manifest::COMPILER_COMMIT] = release.commit
+        doc.root[Manifest::RESOLUTIONS] = Coda::KeyedTable.new(["url", "commit"])
         File.write(root / "zane-lock.coda", doc.serialize(INDENT))
       end
 

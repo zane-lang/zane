@@ -157,8 +157,8 @@ zane test
 ### Compilers and projects
 
 Each project pins its compiler in `zane.coda` (`zane-version`) and
-`zane-lock.coda`, and `zane` runs the installed toolchain of that version for
-it. Compilers are installed side by side in `~/.zane/toolchains/`, so projects
+`zane-lock.coda` (`zane-commit`), and `zane` runs the installed toolchain of
+that version for it. Compilers are installed side by side in `~/.zane/toolchains/`, so projects
 on different versions work next to each other; installing a newer compiler changes no
 project until you run `zane toolchain update` in it.
 

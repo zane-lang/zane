@@ -44,8 +44,9 @@ module Zane
     FILE = "zane.coda"
     LOCK = "zane-lock.coda"
 
-    # The lock row that pins the compiler rather than a dependency.
-    COMPILER_KEY = "zane"
+    # The lock field that pins the commit `zane-version` resolves to (§2.2).
+    COMPILER_COMMIT = "zane-commit"
+    RESOLUTIONS     = "resolutions"
 
     DEPS      = "deps"
     TEST_DEPS = "test-deps"
@@ -78,11 +79,13 @@ module Zane
     # by, where they are not the packages' own (§2.1, §8).
     getter renames : Array(Rename)
     getter resolutions : Hash(String, Resolution)
+    # The commit the compiler tag `zane-version` must resolve to (§2.2, §14).
+    getter zane_commit : String
     # Each in bytes, or nil when the manifest leaves it to the compiler.
     getter fixed_region : Int64?
     getter spawned_fixed_region : Int64?
 
-    def initialize(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions,
+    def initialize(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions, @zane_commit,
                    @fixed_region = nil, @spawned_fixed_region = nil, @renames = [] of Rename)
     end
 
@@ -118,7 +121,8 @@ module Zane
           raise UserError.new("#{path}: #{error}")
         end
       end
-      new(root, zane_version, pattern, deps, test_deps, read_remaps(doc, path), read_lock(root),
+      zane_commit, resolutions = read_lock(root)
+      new(root, zane_version, pattern, deps, test_deps, read_remaps(doc, path), resolutions, zane_commit,
         read_region(doc, path, FIXED_REGION), read_region(doc, path, SPAWNED_FIXED_REGION), renames)
     end
 
@@ -153,9 +157,6 @@ module Zane
       table.each do |key, row|
         unless Project.valid_name?(key)
           raise UserError.new("#{path}: the dependency key `#{key}` is not a package name")
-        end
-        if key == COMPILER_KEY
-          raise UserError.new("#{path}: `#{COMPILER_KEY}` is reserved for the compiler, and is not a dependency key")
         end
         version = row["version"]? || raise UserError.new("#{path}: `#{key}` has no version")
         from = row["from"]? || raise UserError.new("#{path}: `#{key}` has no `from`")
@@ -224,14 +225,16 @@ module Zane
       rename.drop? ? nil : rename.name
     end
 
-    private def self.read_lock(root : Path) : Hash(String, Resolution)
+    # The compiler commit and the dependency rows of the lock file in
+    # *root*.
+    private def self.read_lock(root : Path) : {String, Hash(String, Resolution)}
       path = root / LOCK
       raise UserError.new("#{root} holds #{FILE} but no #{LOCK}") unless File.file?(path)
       Coda::Doc.parse_file(path) do |doc|
-        node = doc.root["resolutions"]? || raise UserError.new("#{path} has no `resolutions` table")
+        node = doc.root[RESOLUTIONS]? || raise UserError.new("#{path} has no `#{RESOLUTIONS}` table")
         table = node.as?(Coda::KeyedTable)
         unless table && table.columns.includes?("url") && table.columns.includes?("commit")
-          raise UserError.new("#{path}: `resolutions` is a table of `key`, `url` and `commit`")
+          raise UserError.new("#{path}: `#{RESOLUTIONS}` is a table of `key`, `url` and `commit`")
         end
         resolutions = {} of String => Resolution
         table.each do |key, row|
@@ -242,17 +245,22 @@ module Zane
           end
           resolutions[key] = Resolution.new(url, commit)
         end
-        resolutions
+        node = doc.root[COMPILER_COMMIT]? || raise UserError.new("#{path} has no `#{COMPILER_COMMIT}` field")
+        commit = node.as?(Coda::StringNode).try(&.value) ||
+                 raise UserError.new("#{path}: `#{COMPILER_COMMIT}` is not a single value")
+        unless COMMIT.matches?(commit)
+          raise UserError.new("#{path}: `#{COMPILER_COMMIT}` is `#{commit}`, which is not a commit hash")
+        end
+        {commit, resolutions}
       end
     rescue error : Coda::Error
       raise UserError.new("#{path}: #{error.message}")
     end
 
-    # Every `deps` and `test-deps` key and the compiler's key have exactly
-    # one lock row, and the lock has no other (§2.2). Anything else is
-    # refused, not guessed at.
+    # Every `deps` and `test-deps` key has exactly one lock row, and the
+    # lock has no other (§2.2). Anything else is refused, not guessed at.
     protected def check_lock(path : Path) : Nil
-      keys = all_deps.map(&.key) << COMPILER_KEY
+      keys = all_deps.map(&.key)
       missing = keys.reject { |k| @resolutions.has_key?(k) }
       extra = @resolutions.keys - keys
       return if missing.empty? && extra.empty?
@@ -274,22 +282,20 @@ module Zane
       else
         deps = deps.any? { |d| d.key == dep.key } ? deps.map { |d| d.key == dep.key ? dep : d } : deps + [dep]
       end
-      Manifest.new(@root, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions,
+      Manifest.new(@root, @zane_version, @version_pattern, deps, test_deps, @remaps, resolutions, @zane_commit,
         @fixed_region, @spawned_fixed_region, @renames)
     end
 
     # The manifest with *renames* as its `renames` rows.
     def with_renames(renames : Array(Rename)) : Manifest
-      Manifest.new(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions,
+      Manifest.new(@root, @zane_version, @version_pattern, @deps, @test_deps, @remaps, @resolutions, @zane_commit,
         @fixed_region, @spawned_fixed_region, renames)
     end
 
-    # The manifest built by the compiler release *tag*, its lock row pinning
+    # The manifest built by the compiler release *tag*, its lock pinning
     # *commit* (§14).
     def with_compiler(tag : String, commit : String) : Manifest
-      resolutions = @resolutions.dup
-      resolutions[COMPILER_KEY] = Resolution.new(CompilerRelease::URL, commit)
-      Manifest.new(@root, tag, @version_pattern, @deps, @test_deps, @remaps, resolutions,
+      Manifest.new(@root, tag, @version_pattern, @deps, @test_deps, @remaps, @resolutions, commit,
         @fixed_region, @spawned_fixed_region, @renames)
     end
 

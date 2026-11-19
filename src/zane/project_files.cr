@@ -61,7 +61,7 @@ module Zane
     end
 
     def self.resolutions(doc : Coda::Doc) : Coda::KeyedTable
-      doc.root["resolutions"].as_keyed_table
+      doc.root[Manifest::RESOLUTIONS].as_keyed_table
     end
 
     private def self.edit(path : Path, change : Coda::Doc -> Nil) : Path
