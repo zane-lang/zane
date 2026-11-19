@@ -178,21 +178,13 @@ against the project's pin.
 
 ## Learning the language
 
-There is no tutorial yet. The language is described in the
-[specification](https://github.com/zane-lang/spec). A good order to read it
-in:
-
-1. [`foundations.md`](https://github.com/zane-lang/spec/blob/main/spec/foundations.md): the ideas the rest of the language rests on
-2. [`syntax.md`](https://github.com/zane-lang/spec/blob/main/spec/syntax.md): what each construct looks like
-3. [`types.md`](https://github.com/zane-lang/spec/blob/main/spec/types.md) and [`functions.md`](https://github.com/zane-lang/spec/blob/main/spec/functions.md): types, constructors and methods
-4. [`memory.md`](https://github.com/zane-lang/spec/blob/main/spec/memory.md) and [`effects.md`](https://github.com/zane-lang/spec/blob/main/spec/effects.md): ownership, references, and what a call may change
-5. [`packages.md`](https://github.com/zane-lang/spec/blob/main/spec/packages.md): how a project is laid out
-
-Every spec document has a matching *design story* in
-[`stories/`](https://github.com/zane-lang/spec/tree/main/stories) that tells
-why the language looks the way it does. The
-[`core` tests](https://github.com/zane-lang/std/tree/main/test/core) are the
-largest body of working Zane code.
+Start at <https://zane-lang.org/docs>: installing, a first project, and a tour
+of the language, with every example checked against the current compiler. The
+same site holds the [specification](https://zane-lang.org/spec), its
+[design stories](https://zane-lang.org/stories), the
+[`std` library](https://zane-lang.org/std), and the design of this command
+([`docs/`](docs/README.md), also at <https://zane-lang.org/tools>), all
+searchable.
 
 ## The other repositories
 
@@ -203,6 +195,8 @@ largest body of working Zane code.
 | [`std`](https://github.com/zane-lang/std) | The `core`, `math` and `regex` packages: numbers, text, lists, control flow, regular expressions |
 | [`zane-nvim`](https://github.com/zane-lang/zane-nvim) | Neovim support |
 | [`coda`](https://github.com/zane-lang/coda) | The configuration format of `zane.coda` and other Zane files |
+| [`docs`](https://github.com/zane-lang/docs) | The Learn pages of the website |
+| [`website`](https://github.com/zane-lang/website) | The website, <https://zane-lang.org>, which publishes the documentation of all of these |
 
 ## Building `zane` from source
 

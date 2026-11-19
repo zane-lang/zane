@@ -43,7 +43,7 @@ module Zane::CLI
       help                   show this text
       version                show the version of zane
 
-    The commands still to come are designed in docs/design/cli.md.
+    The commands still to come are designed in https://zane-lang.org/tools/design/cli.
     TEXT
 
   # Runs one invocation and returns its exit status. Questions are asked only
