@@ -32,9 +32,10 @@ private def with_project(files = {"bin/demo/main.zn" => "package demo;\n"}, deps
     #{deps}]
     CODA
   File.write(root / "zane-lock.coda", <<-CODA)
+    zane-commit 0123456789abcdef0123456789abcdef01234567
+
     resolutions [
         key url commit
-        zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567
     ]
     CODA
   files.each do |path, text|

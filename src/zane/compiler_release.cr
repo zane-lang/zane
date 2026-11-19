@@ -3,11 +3,10 @@ require "./errors"
 
 module Zane
   # A compiler release: the tag a project's `zane-version` names and the commit
-  # its lock row pins (spec dependencies.md §14). *installed* says it was found
+  # its lock file's `zane-commit` pins (spec dependencies.md §14). *installed* says it was found
   # among the installed toolchains rather than online.
   record CompilerRelease, tag : String, commit : String, installed : Bool = false do
-    # Where compiler releases are tagged. It is also the `url` of the reserved
-    # `zane` lock row.
+    # Where compiler releases are tagged.
     URL = "https://github.com/zane-lang/compiler"
 
     # A compiler tag: `vMAJOR.MINOR`, each number without leading zeros.

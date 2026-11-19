@@ -109,7 +109,7 @@ private def toolchain_project(registry : ToolchainRegistry, tag : String, commit
   Dir.mkdir_p(project / "bin" / "app")
   File.write(project / "bin" / "app" / "main.zn", "package app;\n")
   File.write(project / "zane.coda", "zane-version #{tag}\nversion-pattern v*.+.++\n\ndeps [\n    key version from\n#{deps}]\n")
-  File.write(project / "zane-lock.coda", "resolutions [\n    key url commit\n    zane #{Zane::CompilerRelease::URL} #{commit}\n#{rows}]\n")
+  File.write(project / "zane-lock.coda", "zane-commit #{commit}\n\nresolutions [\n    key url commit\n#{rows}]\n")
   project
 end
 
@@ -397,10 +397,7 @@ describe Zane::Toolchain do
         status.should eq 0
         output.should eq "Updated zane v1.0 -> v1.10 (commit #{"b" * 12}).\n"
         File.read(project / "zane.coda").should start_with "zane-version v1.10\nversion-pattern v*.+.++\n"
-        read_coda(project / "zane-lock.coda")["resolutions"].should eq({
-          "columns" => ["url", "commit"],
-          "rows"    => {"zane" => {"url" => Zane::CompilerRelease::URL, "commit" => "b" * 40}},
-        })
+        File.read(project / "zane-lock.coda").should eq "zane-commit #{"b" * 40}\n\nresolutions [\n    key url commit\n]\n"
         Zane::CompilerRelease.installed(Zane::Home.toolchains).should eq({"v1.10" => "b" * 40})
       end
     end
@@ -434,7 +431,7 @@ describe Zane::Toolchain do
         project = toolchain_project(registry, "v3.0", "b" * 40)
         toolchain_update(project, "v1.0")[0].should eq 0
         Zane::Manifest.load(project).zane_version.should eq "v1.0"
-        Zane::Manifest.load(project).resolutions["zane"].commit.should eq "a" * 40
+        Zane::Manifest.load(project).zane_commit.should eq "a" * 40
         Zane::CompilerRelease.installed(Zane::Home.toolchains).keys.should eq ["v1.0"]
       end
     end
@@ -466,7 +463,7 @@ describe Zane::Toolchain do
         {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}.should eq before
 
         toolchain_update(project, "v1.0", "--accept-tag-move")[0].should eq 0
-        Zane::Manifest.load(project).resolutions["zane"].commit.should eq "a" * 40
+        Zane::Manifest.load(project).zane_commit.should eq "a" * 40
       end
     end
 
@@ -477,7 +474,7 @@ describe Zane::Toolchain do
         Dir.mkdir_p(library / "lib" / "library")
         File.write(library / "lib" / "library" / "library.zn", "package library;\n")
         File.write(library / "zane.coda", "zane-version v1.0\nversion-pattern v*.+.++\n")
-        File.write(library / "zane-lock.coda", "resolutions [\n    key url commit\n    zane #{Zane::CompilerRelease::URL} #{"a" * 40}\n]\n")
+        File.write(library / "zane-lock.coda", "zane-commit #{"a" * 40}\n\nresolutions [\n    key url commit\n]\n")
         project = toolchain_project(registry, "v1.0", "a" * 40, "    library v0.1 ../library\n",
           "    library https://example.com/library #{"d" * 40}\n")
         # The release installed holds no compiler that runs, so the update
@@ -497,7 +494,7 @@ describe Zane::Toolchain do
         Dir.mkdir_p(library / "lib" / "library")
         File.write(library / "lib" / "library" / "library.zn", "package library;\n")
         File.write(library / "zane.coda", "zane-version v1.0\nversion-pattern v*.+.++\n")
-        File.write(library / "zane-lock.coda", "resolutions [\n    key url commit\n    zane #{Zane::CompilerRelease::URL} #{"a" * 40}\n]\n")
+        File.write(library / "zane-lock.coda", "zane-commit #{"a" * 40}\n\nresolutions [\n    key url commit\n]\n")
         project = toolchain_project(registry, "v1.0", "a" * 40, "    library v0.1 ../library\n",
           "    library https://example.com/library #{"d" * 40}\n")
         before = {File.read(project / "zane.coda"), File.read(project / "zane-lock.coda")}

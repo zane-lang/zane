@@ -145,7 +145,9 @@ describe Zane::Commands::Init do
       manifest["deps"].should eq({"columns" => ["version", "from"], "rows" => {} of String => Hash(String, String)})
 
       lock = read_coda(root / "zane-lock.coda")
-      lock["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {"zane" => {"url" => COMPILER, "commit" => V03}}})
+      lock.keys.should eq ["zane-commit", "resolutions"]
+      lock["zane-commit"].should eq V03
+      lock["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {} of String => Hash(String, String)})
 
       File.read(root / "bin" / "myApp" / "main.zn").should start_with "package myApp;\n"
       Dir.exists?(root / "test").should be_false
@@ -161,8 +163,7 @@ describe Zane::Commands::Init do
         install("v0.0", V00, url: offline)
         output = init([(tmp / "app").to_s, "--no-git"], url: offline)
         output.should contain "built by the compiler v0.0, the newest one installed."
-        read_coda(tmp / "app" / "zane-lock.coda")["resolutions"].should eq(
-          {"columns" => ["url", "commit"], "rows" => {"zane" => {"url" => offline, "commit" => V00}}})
+        read_coda(tmp / "app" / "zane-lock.coda")["zane-commit"].should eq V00
       end
     end
   end

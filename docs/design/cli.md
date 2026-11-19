@@ -109,13 +109,13 @@ default cannot be worked out.
 The project is pinned to the newest compiler installed (§4.1), so `init` works
 offline, or to the one `--zane-version` names when that one is installed. Its
 tag becomes `zane-version`, and the commit its toolchain record names becomes
-the `zane` lock row.
+the lock file's `zane-commit`.
 
 With no compiler installed, or not the one named, `init` looks the release up
 online instead, by listing the tags of `zane-lang/compiler` with
 `git ls-remote`, so it needs no API access: the highest `vMAJOR.MINOR` tag, or
-the one named, becomes `zane-version`, and the commit it points to becomes the
-`zane` lock row. With no release published, `init` fails. Either way, it says
+the one named, becomes `zane-version`, and the commit it points to becomes
+`zane-commit`. With no release published, `init` fails. Either way, it says
 which compiler it pinned and where it found it.
 
 `init` writes nothing until every question is answered, so cancelling leaves the
@@ -123,7 +123,7 @@ directory untouched. It then writes:
 
 - `zane.coda`, with `zane-version` and `version-pattern`, and an empty `deps`
   table;
-- `zane-lock.coda`, holding only the reserved `zane` row;
+- `zane-lock.coda`, holding `zane-commit` and an empty `resolutions` table;
 - for an application, `bin/<name>/main.zn`, a program package with a `main`;
 - for a library, `lib/<name>/<name>.zn`, a library package with one public
   example function, and `test/<name>/main.zn`, a test package whose `main`
@@ -235,6 +235,11 @@ Deletes `out/`.
 These and `zane toolchain update` (§4) are the only commands that write
 `zane.coda` and `zane-lock.coda`, and they always change the two files together
 ([`dependencies.md` §2.3](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#23-files-are-recorded-and-updated-by-commands)).
+`zane` also reads a lock file that pins the compiler with a `zane` row of
+`resolutions`, with no `zane-commit` field, as lock files did before the field
+existed, so packages that published such a lock still resolve. A command that
+writes such a lock rewrites it with `zane-commit` in place of the row, which
+leaves the key `zane` free for a dependency.
 
 | Command | Does |
 |---|---|
@@ -297,7 +302,7 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   the package's stamp, into `build/<target>/`, and stamps the packages of
   the file of C module hashes beside them. Last, `zane` writes
   `build/<target>.coda`, recording the commit, target, archive hash and
-  compiler pin (`zane-version` and the `zane` lock row's commit) the objects
+  compiler pin (`zane-version` and `zane-commit`) the objects
   were made with. The objects are reused only while all five match;
   otherwise they are rewritten again, from the kept archive when its hash
   still matches.
@@ -367,7 +372,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has the compiler its `zane-version` names write their `!`-prefixed objects for each target, with the files it writes beside them (§5), packs one archive per target of all of them, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
-| `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and the `zane` lock row's commit together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than the lock row pins has moved, and is refused with a security error without the flag. |
+| `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and `zane-commit` together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than `zane-commit` pins has moved, and is refused with a security error without the flag. |
 | `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named (§4.2). Works outside a project and changes none. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed: the one program, or the one named when there are several. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
@@ -386,7 +391,7 @@ commit 0123456789abcdef0123456789abcdef01234567
 ```
 
 `url` is the repository the compiler was built from, and `commit` the commit
-its tag pointed to, which is what a project's `zane` lock row pins. Installation
+its tag pointed to, which is what a project's `zane-commit` pins. Installation
 downloads the selected GitHub Release archive for the CLI's host and verifies
 it against that release's `SHA256SUMS`. It checks the archive's version and
 record against the repository tag, then atomically publishes the complete

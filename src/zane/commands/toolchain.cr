@@ -63,12 +63,7 @@ module Zane::Commands
       resolve(ws.manifest.with_compiler(release.tag, release.commit))
       ProjectFiles.change(ws.root,
         ->(doc : Coda::Doc) { doc.root["zane-version"] = release.tag; nil },
-        ->(doc : Coda::Doc) {
-          row = ProjectFiles.resolutions(doc)[Manifest::COMPILER_KEY]
-          row["url"] = CompilerRelease::URL
-          row["commit"] = release.commit
-          nil
-        })
+        ->(doc : Coda::Doc) { doc.root[Manifest::COMPILER_COMMIT] = release.commit; nil })
       @output.puts "Updated zane #{current} -> #{release.tag} (commit #{release.commit[0, 12]})."
       0
     end

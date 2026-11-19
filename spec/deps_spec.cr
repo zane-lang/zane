@@ -64,7 +64,7 @@ private class Registry
   def publish(name : String, tag : String, deps = [] of {String, String}, program = false,
               archive : Bytes? = nil, artifacts = true, package_name = name, pattern = "v*.+.++",
               zane_version = "v0.1", target = Zane::Target::HOST, also = [] of String,
-              renames = [] of {String, String, String}) : String
+              renames = [] of {String, String, String}, legacy_lock = false) : String
     repo = @dir / name
     unless Dir.exists?(repo)
       Dir.mkdir_p(repo)
@@ -91,12 +91,23 @@ private class Registry
       #{renamed}
       CODA
     rows = deps.map { |d, t| "    #{d} #{url(d)} #{git(@dir / d, "rev-parse", "#{t}^{commit}")}\n" }.join
-    File.write(repo / "zane-lock.coda", <<-CODA)
+    if legacy_lock
+      # How a lock pinned the compiler before `zane-commit`: a `zane` row.
+      File.write(repo / "zane-lock.coda", <<-CODA)
+        resolutions [
+            key url commit
+            zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567
+        #{rows}]
+        CODA
+    else
+      File.write(repo / "zane-lock.coda", <<-CODA)
+      zane-commit 0123456789abcdef0123456789abcdef01234567
+
       resolutions [
           key url commit
-          zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567
       #{rows}]
       CODA
+    end
     if artifacts
       bytes = archive || tar_gz([{"build/", '5', ""}, {"build/#{name}.o", '0', "object #{name} #{tag}"}])
       file = @dir / "#{name}-#{tag}.tar.gz"
@@ -126,7 +137,7 @@ private def with_registry(&)
   Dir.mkdir_p(registry.dir)
   Dir.mkdir_p(project / "bin" / "app")
   File.write(project / "zane.coda", "zane-version v0.1\nversion-pattern v*.+.++\n\ndeps [\n    key version from\n]\n")
-  File.write(project / "zane-lock.coda", "resolutions [\n    key url commit\n    zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567\n]\n")
+  File.write(project / "zane-lock.coda", "zane-commit 0123456789abcdef0123456789abcdef01234567\n\nresolutions [\n    key url commit\n]\n")
   File.write(project / "bin" / "app" / "main.zn", "package app;\n")
   saved = DEPS_ENV.to_h { |v| {v, ENV[v]?} }
   ENV["ZANE_COMPILER"] = DEPS_ZANEC
@@ -419,6 +430,30 @@ describe Zane::Commands::Add do
       ENV.delete("FAKE_ZANEC_C")
       zane(["build"], project)[0].should eq 0
       File.read_lines(log).last.should_not contain("package.c.")
+    end
+  end
+
+  it "takes `zane` as a dependency key like any other, apart from the compiler pin" do
+    with_registry do |registry, project, _|
+      commit = registry.publish("zane", "v1.0")
+      zane(["add", registry.url("zane")], project)[0].should eq 0
+      lock_rows(project).should eq({"zane" => {"url" => registry.url("zane"), "commit" => commit}})
+      read_coda(project / "zane-lock.coda")["zane-commit"].should eq "0123456789abcdef0123456789abcdef01234567"
+      Zane::Workspace.load(project).toolchain.should eq({"v0.1", "0123456789abcdef0123456789abcdef01234567"})
+      zane(["build"], project)[0].should eq 0
+      zane(["remove", "zane"], project)[0].should eq 0
+      lock_rows(project).should be_empty
+      read_coda(project / "zane-lock.coda")["zane-commit"].should eq "0123456789abcdef0123456789abcdef01234567"
+    end
+  end
+
+  it "reads a library whose lock pins the compiler with a `zane` row, as locks did before `zane-commit`" do
+    with_registry do |registry, project, _|
+      registry.publish("math", "v1.0", legacy_lock: true)
+      registry.publish("shapes", "v2.0", deps: [{"math", "v1.0"}], legacy_lock: true)
+      zane(["add", registry.url("shapes")], project)[0].should eq 0
+      zane(["build"], project)[0].should eq 0
+      registry.fetched.size.should eq 2
     end
   end
 
@@ -871,7 +906,7 @@ describe Zane::Commands::Remove do
       File.write(project / "bin" / "app" / "main.zn", "package app;\nimport math$sqrt;\nimport mathExtra;\n")
       zane(["remove", "math"], project).should eq({0, "Removed math.\n", "zane: warning: bin/app/main.zn:2 still imports a package of math\n"})
       deps_rows(project).should eq({} of String => Hash(String, String))
-      lock_rows(project).keys.should eq ["zane"]
+      lock_rows(project).keys.should be_empty
       expect_raises(Zane::UserError, "does not depend on `math`; it has no dependencies") { zane(["remove", "math"], project) }
     end
   end
@@ -1046,7 +1081,7 @@ describe "test-deps" do
       output.should contain "Import its packages in test/ with: import probe"
       deps_rows(project).as(Hash).keys.should eq ["math"]
       test_rows(project).should eq({"probe" => {"version" => "v3.0", "from" => "release"}})
-      lock_rows(project).keys.should eq ["zane", "math", "probe"]
+      lock_rows(project).keys.should eq ["math", "probe"]
 
       math, probe = registry.id("math", "v1.0"), registry.id("probe", "v3.0")
       math_src, probe_src = entry("math", "v1.0") / "src" / "lib" / "math", entry("probe", "v3.0") / "src" / "lib" / "probe"
@@ -1086,7 +1121,7 @@ describe "test-deps" do
       _, _, warning = zane(["remove", "probe"], project)
       warning.should eq "zane: warning: test/geo/main.zn:2 still imports a package of probe\n"
       test_rows(project).should eq({} of String => Hash(String, String))
-      lock_rows(project).keys.should eq ["zane", "math"]
+      lock_rows(project).keys.should eq ["math"]
     end
   end
 
@@ -1130,6 +1165,32 @@ describe Zane::Manifest do
       expect_raises(Zane::UserError, "zane-lock.coda has no row for `probe`") { Zane::Manifest.load(project) }
       write.call(base.sub("]", "    probe v1.0 release\n]") + tests, with_probe)
       expect_raises(Zane::UserError, "`probe` is in both `deps` and `test-deps`") { Zane::Manifest.load(project) }
+    end
+  end
+
+  it "reads the compiler pin from `zane-commit`, and refuses a lock without one" do
+    with_registry do |_, project|
+      lock = project / "zane-lock.coda"
+      Zane::Manifest.load(project).zane_commit.should eq "0123456789abcdef0123456789abcdef01234567"
+      File.write(lock, "resolutions [\n    key url commit\n]\n")
+      expect_raises(Zane::UserError, "zane-lock.coda has no `zane-commit` field") { Zane::Manifest.load(project) }
+      File.write(lock, "zane-commit main\n\nresolutions [\n    key url commit\n]\n")
+      expect_raises(Zane::UserError, "`zane-commit` is `main`, which is not a commit hash") { Zane::Manifest.load(project) }
+    end
+  end
+
+  it "reads a lock that pins the compiler with a `zane` row, and writes it with `zane-commit` when it next changes" do
+    with_registry do |registry, project|
+      lock = project / "zane-lock.coda"
+      File.write(lock, "resolutions [\n    key url commit\n    zane https://github.com/zane-lang/compiler 0123456789abcdef0123456789abcdef01234567\n]\n")
+      manifest = Zane::Manifest.load(project)
+      manifest.zane_commit.should eq "0123456789abcdef0123456789abcdef01234567"
+      manifest.resolutions.should be_empty
+
+      commit = registry.publish("math", "v1.0")
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      File.read(lock).should eq "zane-commit 0123456789abcdef0123456789abcdef01234567\n\n" \
+                                "resolutions [\n    key url commit\n    math #{registry.url("math")} #{commit}\n]\n"
     end
   end
 end

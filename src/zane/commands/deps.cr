@@ -281,9 +281,6 @@ module Zane::Commands
       unless Project.valid_name?(key)
         raise UserError.new("`#{key}` is not a package name, so it cannot be the key; choose one with --as")
       end
-      if key == Manifest::COMPILER_KEY
-        raise UserError.new("`#{key}` is reserved for the compiler; choose another key with --as")
-      end
       if ws.manifest.dependency?(key)
         raise UserError.new("the project already depends on `#{key}`; change its version with `zane update`")
       end

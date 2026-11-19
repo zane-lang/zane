@@ -17,7 +17,7 @@ module Zane
     # never disagree.
     def self.change(root : Path, manifest : Coda::Doc -> Nil, lock : (Coda::Doc -> Nil)? = nil) : Nil
       edited = edit(root / Manifest::FILE, manifest)
-      locked = lock.try { |l| edit(root / Manifest::LOCK, l) }
+      locked = lock.try { |l| edit(root / Manifest::LOCK, ->(doc : Coda::Doc) { migrate_lock(doc); l.call(doc) }) }
       unless locked
         File.rename(edited, root / Manifest::FILE)
         return
@@ -61,7 +61,31 @@ module Zane
     end
 
     def self.resolutions(doc : Coda::Doc) : Coda::KeyedTable
-      doc.root["resolutions"].as_keyed_table
+      doc.root[Manifest::RESOLUTIONS].as_keyed_table
+    end
+
+    # Rewrites a lock *doc* that pins the compiler with a `zane` row, as
+    # locks did before `zane-commit` (spec dependencies.md §2.2), into one
+    # that pins it with the field, ahead of the `resolutions` table. Every
+    # lock a command writes is then in the current form, so the `zane` row
+    # is free for a dependency.
+    def self.migrate_lock(doc : Coda::Doc) : Nil
+      return if doc.root.has_key?(Manifest::COMPILER_COMMIT)
+      old = resolutions(doc)
+      pin = old[Manifest::LEGACY_COMPILER_KEY]? || return
+      commit = pin["commit"]
+      rows = old.reject { |key, _| key == Manifest::LEGACY_COMPILER_KEY }
+        .map { |key, row| {key, row.to_h} }
+      columns = old.columns
+      doc.root.delete(Manifest::RESOLUTIONS)
+      doc.root[Manifest::COMPILER_COMMIT] = commit
+      table = Coda::KeyedTable.new(columns)
+      doc.root[Manifest::RESOLUTIONS] = table
+      rows.each do |key, values|
+        row = Coda::Row.new
+        columns.each { |c| values[c]?.try { |v| row.insert(c, v) } }
+        table[key] = row
+      end
     end
 
     private def self.edit(path : Path, change : Coda::Doc -> Nil) : Path
