@@ -24,7 +24,7 @@ module Zane
       end
     end
 
-    # What remapping decided: each displaced tag with the tag chosen in its
+    # The outcome of remapping: each displaced tag with the tag chosen in its
     # place, and the patterns that kept versions apart, when they differ.
     record Result, chosen : Hash(String, String), divergent : Hash(String, String)?
 

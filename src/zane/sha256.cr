@@ -40,7 +40,7 @@ class Zane::SHA256
     matches.first
   end
 
-  # The digest of the file at *path*. *read*, when given, is told the size of
+  # The digest of the file at *path*. *read*, when given, receives the size of
   # each piece hashed, so a caller can show how far it has got.
   def self.file(path : String | Path, read : (Int32 -> Nil)? = nil) : String
     sha = new

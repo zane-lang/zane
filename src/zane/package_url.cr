@@ -6,16 +6,16 @@ module Zane
   # directory the package cache keeps it in, and the identity hash its symbols
   # carry (spec dependencies.md §6.1, §7).
   struct PackageUrl
-    # What a cache directory name, and a version tag, may hold. Anything else
-    # is refused rather than escaped (§7). It is also what the compiler accepts
-    # in a stamp's tag.
+    # The characters a cache directory name and a version tag may contain.
+    # Anything else is refused rather than escaped (§7). The compiler accepts
+    # the same characters in a stamp's tag.
     SAFE = /\A[A-Za-z0-9._+~-]+\z/
 
     # The URL as written, which is what git is given.
     getter url : String
 
     # The URL's host and path, with the scheme, any SSH user and an SCP-style
-    # `:` taken away, so every spelling of one repository gives the same one.
+    # `:` taken away, so every spelling of one repository gives the same host and path.
     getter normalized : String
 
     def initialize(@url : String, @normalized : String)
@@ -38,7 +38,7 @@ module Zane
       new(url, normalized)
     end
 
-    # Whether *component* may name a directory as it is.
+    # Whether *component* may be used unchanged as a directory name.
     def self.safe?(component : String) : Bool
       SAFE.matches?(component) && component != "." && component != ".."
     end

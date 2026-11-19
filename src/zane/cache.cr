@@ -18,14 +18,16 @@ module Zane
   #     archive.tar.gz          the release archive, verified
   #     build/                  its objects, as published
   #   build/<target>/           those objects, rewritten
-  #   build/<target>.coda       what they were rewritten from, and with
+  #   build/<target>.coda       the record of the commit, target, archive
+  #                             hash and compiler pin they were rewritten from
   #   build-from-source/<target>/package.o
   #                             the object compiled from src/ (§12.1), and
   #                             what the compiler writes beside it: the
   #                             objects of its C holding assembly and the
   #                             file of its C modules' hashes
   #   build-from-source/<target>.coda
-  #                             what it was compiled from, and with
+  #                             the record of the commit, target and
+  #                             compiler pin it was compiled with
   #   build-from-source/<target>.<places>/, <target>.<places>.coda
   #                             the same, compiled for the programs that
   #                             write back into one set of places, the hash

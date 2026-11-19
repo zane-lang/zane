@@ -9,10 +9,10 @@ module Zane
   # its library committed, and unpacking its objects (spec dependencies.md
   # §3.1, §5).
   module Archive
-    # Downloads *url* to *path*. Specs replace it; everything else uses curl.
+    # Downloads *url* to *path*. Specs replace this method; every other caller uses curl.
     class_property download : Proc(String, Path, Nil) = ->(url : String, path : Path) { curl(url, path) }
 
-    # curl ships with every supported system. It is told to speak only HTTPS,
+    # curl ships with every supported system. `zane` tells curl to speak only HTTPS,
     # redirects included, and to fail on an error status rather than save the
     # error page.
     def self.curl(url : String, path : Path) : Nil
@@ -29,7 +29,7 @@ module Zane
 
     # Downloads *url* to *path* and checks it is the archive whose SHA-256 is
     # *sha256*. Nothing is left at *path* unless it is. The progress display
-    # shows both as steps, naming the archive *what*.
+    # shows the download and the check as two steps, naming the archive *what*.
     def self.fetch(url : String, sha256 : String, path : Path, what : String = url) : Nil
       Dir.mkdir_p(path.parent)
       partial = path.parent / ".#{path.basename}.#{Random::Secure.hex(4)}"
@@ -48,7 +48,7 @@ module Zane
     end
 
     # Refuses the file at *path* unless its SHA-256 is *sha256*. *read*, when
-    # given, is told the size of each piece hashed.
+    # given, receives the size of each piece hashed.
     def self.verify(path : Path, sha256 : String, url : String, read : (Int32 -> Nil)? = nil) : Nil
       actual = SHA256.file(path, read)
       return if actual == sha256
@@ -62,7 +62,7 @@ module Zane
     # *dir* (§3.1). Toolchains specify their own root, strip it and preserve
     # executable bits. The tar format is read here, rather than by `tar`, so that
     # every entry is checked before anything is written. Nothing is left at
-    # *dir* unless it succeeds. *read*, when given, is told the size of each
+    # *dir* unless it succeeds. *read*, when given, receives the size of each
     # piece of *path* read, so a caller can show how far it has got.
     def self.extract(path : Path, dir : Path, root : String = "build",
                      strip_root : Bool = false, executable_modes : Bool = false,
@@ -93,7 +93,7 @@ module Zane
       FileUtils.rm_rf(partial) if partial_created && partial && Dir.exists?(partial)
     end
 
-    # Reads through *io*, telling *count* how many bytes each read gave.
+    # Reads through *io*, passing *count* the number of bytes each read returned.
     private class Counting < IO
       def initialize(@io : IO, @count : Int32 -> Nil)
       end

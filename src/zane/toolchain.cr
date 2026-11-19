@@ -10,7 +10,7 @@ module Zane::Toolchain
 
   # Specs replace the Git lookup, just as they replace Archive.download.
   class_property resolve : Proc(String, CompilerRelease) = ->(tag : String) { CompilerRelease.resolve(tag) }
-  # And the listing of the release tags.
+  # Specs also replace the listing of the release tags.
   class_property releases : Proc(Array(String)) = -> { CompilerRelease.listed.keys }
 
   # The platform a compiler release names its archive for, as
@@ -29,9 +29,9 @@ module Zane::Toolchain
   end
 
   # Uses the latest published release by default, even when an older compiler
-  # is installed or the current project pins another version. *vet* sees the
+  # is installed or the current project pins another version. *vet* receives the
   # release and the commit its tag points to before anything is downloaded,
-  # and refuses it by raising. *progress* is told each step as it happens.
+  # and refuses the release by raising. *progress* receives each step as it happens.
   def self.install(tag : String? = nil, dir : Path = Home.toolchains,
                    platform : String = host, vet : (CompilerRelease -> Nil)? = nil,
                    progress : Progress = Progress.current) : CompilerRelease

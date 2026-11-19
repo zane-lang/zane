@@ -33,19 +33,19 @@ module Zane
     # place in the cache, which a path dependency has none of.
     record Package, key : String, url : PackageUrl, tag : String, commit : String,
       from : From, manifest : Manifest, entry : CacheEntry?, layout : Layout do
-      # What its symbols carry in place of the placeholder (§6.1).
+      # The text its symbols carry in place of the `!` placeholder (§6.1).
       def stamp : String
         url.stamp(tag)
       end
 
-      # What the compiler knows one of its library packages by: the stamp,
+      # The name the compiler gives one of its library packages: the stamp,
       # then the package's path (compiler docs/design/separate-compilation.md
       # C10).
       def id(library : Layout::Lib) : String
         "#{stamp}#{library.path}"
       end
 
-      # The version of the package it is: its URL and tag.
+      # The URL and tag that identify this version of the package.
       def node : String
         Graph.node(url, tag)
       end
@@ -90,7 +90,7 @@ module Zane
     getter notes = [] of String
 
     @nodes = {} of String => Package
-    # Which URL each identity hash belongs to, so two never share one (§6.1).
+    # Which URL each identity hash belongs to, so no two URLs share an identity hash (§6.1).
     @hashes = {} of String => String
     # What each version depends on, as its manifest pins it; the project's
     # own dependencies are under "".
@@ -401,7 +401,7 @@ module Zane
     end
 
     # Each public library package of *edges*' packages, by the key it is
-    # imported by, its name, and what the compiler knows it by. A remapped
+    # imported by, its name, and the name the compiler knows it by. A remapped
     # edge keeps the packages of the version it pins, each found in the
     # version chosen in its place.
     def public_keys(edges : Array(Edge), remapped : Bool = true) : Array({String, String})
@@ -427,7 +427,7 @@ module Zane
     # hashes (compiler docs/design/ffi.md F15).
     HASHES = ".c.hashes"
 
-    # Whether *file* is one of those, not an object.
+    # Whether *file* is a file of C module hashes, not an object.
     def self.hashes?(file : Path) : Bool
       file.basename.ends_with?(HASHES)
     end

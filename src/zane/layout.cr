@@ -86,7 +86,7 @@ module Zane
     # key it imports it by, its name (packages.md §4.3): a top-level package
     # imports the other top-level ones and its own subpackages, and a
     # subpackage its own subpackages and every top-level package but the
-    # one it lies within.
+    # top-level package it lies within.
     def keys(library : Lib) : Array({String, Lib})
       children = @libs.select { |l| l.parent == library.path }
       tops = top_libs.reject { |l| l.path == library.top }
