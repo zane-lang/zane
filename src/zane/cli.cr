@@ -43,14 +43,14 @@ module Zane::CLI
       help                   show this text
       version                show the version of zane
 
-    The commands still to come are designed in docs/design/cli.md.
+    The commands still to come are designed in https://zane-lang.org/tools/design/cli.
     TEXT
 
   # Runs one invocation and returns its exit status. Questions are asked only
   # when *interactive*, which is true when standard input is a terminal.
   def self.run(args : Array(String), stdout : IO = STDOUT, stderr : IO = STDERR,
                stdin : IO = STDIN, interactive : Bool = STDIN.tty?) : Int32
-    # One display shows the slow steps of whichever command runs.
+    # A single progress display shows the slow steps of the command being run.
     Progress.run(stderr) do
       case args.first?
       when nil, "help", "-h", "--help"
