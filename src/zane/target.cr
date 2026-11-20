@@ -3,8 +3,8 @@ module Zane
   # them (compiler docs/design/platforms.md).
   module Target
     # The machine `zane` runs on, which is what a build is for unless
-    # `--target` names another target. The artifact fetched for a library is
-    # the one built for this machine.
+    # `--target` names another target. A build fetches each library's artifact
+    # for the build's target, which is this machine by default.
     HOST = {% begin %}
              {% arch = flag?(:aarch64) ? "aarch64" : "x86_64" %}
              {% if flag?(:win32) %}
