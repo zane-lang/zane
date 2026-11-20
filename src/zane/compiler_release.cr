@@ -3,8 +3,8 @@ require "./errors"
 
 module Zane
   # A compiler release: the tag a project's `zane-version` names and the commit
-  # its lock file's `zane-commit` pins (spec dependencies.md §14). *installed* says it was found
-  # among the installed toolchains rather than online.
+  # its lock file's `zane-commit` pins (spec dependencies.md §14). *installed* is true
+  # when the release was found among the installed toolchains, and false when it was found online.
   record CompilerRelease, tag : String, commit : String, installed : Bool = false do
     # Where compiler releases are tagged.
     URL = "https://github.com/zane-lang/compiler"

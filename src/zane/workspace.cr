@@ -6,11 +6,11 @@ require "./project"
 
 module Zane
   # A project on disk: the directory holding its `zane.coda`, and what the
-  # manifest says a build needs.
+  # manifest declares that a build needs.
   record Workspace, manifest : Manifest do
     MANIFEST = Manifest::FILE
 
-    # The project *dir* is in: the nearest directory, *dir* itself or one
+    # The project that contains *dir*: the nearest directory, *dir* itself or one
     # above it, that holds a manifest.
     def self.find(dir : Path) : Workspace
       dir = dir.expand
@@ -39,7 +39,7 @@ module Zane
       manifest.root
     end
 
-    # What the project is called where a person reads it: its directory.
+    # The project's name as shown to a person: its directory.
     def title : String
       root.basename
     end

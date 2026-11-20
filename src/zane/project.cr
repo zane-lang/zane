@@ -17,7 +17,7 @@ module Zane
     end
 
     # The package name a directory's name suggests: its words joined in
-    # camelCase, so `my-tool` gives `myTool`. Nil when that is not a valid name.
+    # camelCase, so `my-tool` gives `myTool`. Nil when the result is not a valid package name.
     def self.name_from(dir_name : String) : String?
       words = dir_name.split(/[^A-Za-z0-9]+/, remove_empty: true)
       return nil if words.empty?

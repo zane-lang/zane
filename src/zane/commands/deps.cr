@@ -160,7 +160,8 @@ module Zane::Commands
 
   # `zane add <url> [tag] [--as key] [--from-source] [--test]` (§3): pins a
   # project, fetches it, and records it in both of the project's files, in
-  # `test-deps` when *--test* says only the test packages import it.
+  # `test-deps` when *--test* is given, because only the test packages import
+  # the dependency.
   class Add < EditCommand
     @key : String? = nil
     @from_source = false
@@ -379,7 +380,8 @@ module Zane::Commands
     end
 
     # A tag that now points to another commit than the lock pins has moved,
-    # which is trusted only when asked (spec dependencies.md §2.3, §4).
+    # which `zane` accepts only with `--accept-tag-move` (spec dependencies.md
+    # §2.3, §4).
     private def check_tag_move(dep : Dependency, url : PackageUrl, commit : String, locked : Resolution) : Nil
       return if @accept_tag_move
       raise UserError.new("security error: #{url} tag #{dep.version} is commit #{commit}, but the lock file pins " \
@@ -423,8 +425,8 @@ module Zane::Commands
 
     # A local project stands in for the release it replaces, and is named
     # with that release's stamp (spec dependencies.md §12.2), so it has to
-    # be the same package: it gives the public library packages the pinned
-    # commit's does.
+    # be the same package: it must provide the public library packages the
+    # pinned commit provides.
     private def same_package(dep : Dependency, dir : Path) : Nil
       local = Layout.new(dir).public_libs.map(&.name).sort
       resolution = workspace.manifest.resolutions[dep.key]

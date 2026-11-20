@@ -81,7 +81,8 @@ module Zane
     getter resolutions : Hash(String, Resolution)
     # The commit the compiler tag `zane-version` must resolve to (§2.2, §14).
     getter zane_commit : String
-    # Each in bytes, or nil when the manifest leaves it to the compiler.
+    # The fixed-region sizes of the main thread and of each spawned call, each
+    # in bytes, or nil when the manifest leaves that size to the compiler.
     getter fixed_region : Int64?
     getter spawned_fixed_region : Int64?
 
@@ -218,7 +219,7 @@ module Zane
     end
 
     # The name the project imports *package* of the dependency *key* by:
-    # its own, the one a `renames` row gives it, or nil when a row drops it.
+    # its own, the name a `renames` row gives it, or nil when a row drops it.
     def import_name(key : String, package : String) : String?
       rename = @renames.find { |r| r.dependency == key && r.package == package }
       return package unless rename

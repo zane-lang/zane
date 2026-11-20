@@ -44,8 +44,8 @@ module Zane
       [match[1].to_i, match[2].to_i, (match[3]? || "0").to_i]
     end
 
-    # What an update did to the binary at *path*: installed *tag*, found it
-    # already is *tag*, or found it newer than the latest release, *tag*. The
+    # What an update did to the binary at *path*: installed *tag*, found the
+    # binary already at *tag*, or found the binary newer than the latest release, *tag*. The
     # path is found before the update, since afterwards the running process's
     # own file is gone.
     record Result, tag : String, outcome : Outcome, path : Path

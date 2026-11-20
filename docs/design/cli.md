@@ -98,7 +98,7 @@ In a terminal, `init` asks these questions, showing the default for each:
 The name must be a valid package name
 ([`lexical.md` §3](https://github.com/zane-lang/spec/blob/main/spec/lexical.md)).
 The version-pattern question explains the pattern in one line, because the
-spec fixes it when the project is created
+spec fixes the pattern when the project is created
 ([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
 
 Every question has a flag: `--name`, `--lib` / `--app`, `--version-pattern`,
@@ -107,16 +107,16 @@ terminal, `init` asks nothing: it uses the flags and defaults, and fails if a
 default cannot be worked out.
 
 The project is pinned to the newest compiler installed (§4.1), so `init` works
-offline, or to the one `--zane-version` names when that one is installed. Its
-tag becomes `zane-version`, and the commit its toolchain record names becomes
-the lock file's `zane-commit`.
+offline, or to the compiler `--zane-version` names, when that compiler is
+installed. Its tag becomes `zane-version`, and the commit its toolchain record
+names becomes the lock file's `zane-commit`.
 
 With no compiler installed, or not the one named, `init` looks the release up
 online instead, by listing the tags of `zane-lang/compiler` with
 `git ls-remote`, so it needs no API access: the highest `vMAJOR.MINOR` tag, or
-the one named, becomes `zane-version`, and the commit it points to becomes
-`zane-commit`. With no release published, `init` fails. Either way, it says
-which compiler it pinned and where it found it.
+the tag `--zane-version` names, becomes `zane-version`, and the commit that tag
+points to becomes `zane-commit`. With no release published, `init` fails.
+Either way, `init` reports which compiler it pinned and where it found it.
 
 `init` writes nothing until every question is answered, so cancelling leaves the
 directory untouched. It then writes:
@@ -155,8 +155,8 @@ for `zane.coda` there and in each directory above.
 
 Before calling the compiler, `zane` reads the project's packages from `lib/`,
 `bin/` and `test/` and holds them to the rules of
-[`packages.md` §2 and §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#2-projects-and-packages), since it is
-the one listing the directories: a `.zn` file directly in one of the three, a
+[`packages.md` §2 and §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#2-projects-and-packages), since `zane`, not the
+compiler, lists the directories: a `.zn` file directly in one of the three, a
 program package with a subdirectory of sources, a nested test package that
 mirrors no subpackage, and the names a project keeps apart.
 
@@ -164,10 +164,10 @@ mirrors no subpackage, and the names a project keeps apart.
 
 Resolves and fetches dependencies
 ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)),
-then has `zanec` compile and link every program package in `bin/`, or the one
-named. Each goes to `out/<target>/<name>`, with `out/host/<name>` when no
-target is given, and `-o` names the file when one program is built. The
-program is optimized. `T` is a target triple, spelled as `zig cc` reads it,
+then has `zanec` compile and link every program package in `bin/`, or only
+the program you name. Each goes to `out/<target>/<name>`, with
+`out/host/<name>` when no target is given, and `-o` names the file when one
+program is built. The program is optimized. `T` is a target triple, spelled as `zig cc` reads it,
 such as `x86_64-windows-gnu`
 ([compiler `platforms.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/platforms.md)),
 and defaults to the host, which `zane` names the same way: `x86_64-linux-gnu`,
@@ -184,15 +184,15 @@ take, in every program and test package it builds
 `zane` checks that each is a positive whole number of `MiB` or `GiB` whose
 byte count fits its `Int64` representation, and passes it in bytes (§5).
 There is no `32GiB` cap: native addresses let the runtime reserve whatever
-range the target system permits. A dependency's manifest has no say in either
+range the target system permits. A dependency's manifest cannot set either
 ([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
 
 ### 2.4 `zane run [PROGRAM] [-- ARGS]`
 
 Builds a program package for the host into `out/run/<name>`, then runs it with
-`ARGS` and exits with its status. A project with several programs names the
-one to run. Its build is the one that gives the program's result soonest,
-counting the build and the run together: the compiler's tiered build
+`ARGS` and exits with its status. In a project with several programs, you name
+the program to run. `run` uses the build that gives the program's result
+soonest, counting the build and the run together: the compiler's tiered build
 ([compiler `tiers.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/tiers.md)).
 `zane` starts the optimized build, tier 1, in the background, builds the
 unoptimized one, tier 0, and runs it as soon as it is linked, with
@@ -203,15 +203,15 @@ optimizer and a long one finishes on optimized code. A tier-1 build still
 going when the program ends is stopped, and what an earlier run left beside
 the program is removed before the build. The compiler keeps tier-1 libraries
 in its cache, so a program run again unchanged takes optimized code within
-its first moments. The program means the same either way, so only its speed
-differs from what `build` makes.
+its first moments. The program behaves the same either way, so only its speed
+differs from the program `build` makes.
 
 ### 2.5 `zane test [TEST] [-- ARGS]`
 
-Builds every test package in `test/`, or the one named by its directory under
-`test/`, such as `gui/opengl`, for the host into `out/test/`, and runs each
-with `ARGS`, each built and run as `run` builds and runs a program, so the
-two never differ. Each test package is the root of its
+Builds every test package in `test/`, or only the test package named by its
+directory under `test/`, such as `gui/opengl`, for the host into `out/test/`,
+and runs each with `ARGS`, each built and run as `run` builds and runs a
+program, so the two never differ. Each test package is the root of its
 own build, and the project's library packages are compiled with it
 ([`packages.md` §7.2](https://github.com/zane-lang/spec/blob/main/spec/packages.md#72-each-test-package-is-the-root-of-its-own-test-build)).
 The graph is the project's `deps` and `test-deps` together
@@ -220,9 +220,9 @@ Run on one test package, `test` exits with its status. Run on all, it names
 each as it starts, then says how many passed or which failed, and exits with
 1 when any did. A project with no test package is refused.
 
-What a test does and how it reports is the test package's own business: `zane`
-runs one program for each and passes on its exit status, so a testing library
-in `test-deps` decides how failures are counted and shown.
+Each test package decides what its tests do and how they report: `zane` runs
+one program for each test package and passes on that program's exit status, so a
+testing library in `test-deps` decides how failures are counted and shown.
 
 ### 2.6 `zane clean`
 
@@ -370,7 +370,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and `zane-commit` together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than `zane-commit` pins has moved, and is refused with a security error without the flag. |
 | `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named (§4.2). Works outside a project and changes none. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
-| `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed: the one program, or the one named when there are several. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
+| `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed, for the project's only program or, when there are several, the program you name. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
 What a release produces for a project's programs is not designed yet.
 
@@ -530,7 +530,7 @@ subpackage it tests
 6. **Inspection.** `inspect` and its six views, with `--optimize` and
    `--target` for the views of a build (§4). Built.
 
-`zane` runs the first compiler it finds of: the one `ZANE_COMPILER` names, the
-toolchain installed for the project's `zane-version` (§4.1), and `zanec` on
-`PATH`. A compiler selected by `ZANE_COMPILER` or `PATH` is not checked against
-the project's pin.
+`zane` runs the first compiler it finds among these, in this order: the
+compiler `ZANE_COMPILER` names, the toolchain installed for the project's
+`zane-version` (§4.1), and `zanec` on `PATH`. A compiler selected by
+`ZANE_COMPILER` or `PATH` is not checked against the project's pin.

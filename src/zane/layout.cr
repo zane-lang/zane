@@ -5,8 +5,8 @@ module Zane
   # A project's packages as its directories lay them out: library packages
   # in `lib/`, each with its subpackages, program packages in `bin/`, and
   # test packages in `test/` (spec packages.md §2). The compiler reads one
-  # directory per package, so `zane` is the one that sees the layout and
-  # holds it to its rules.
+  # directory per package, so only `zane` sees the layout, and `zane` holds it
+  # to its rules.
   class Layout
     # A library package: its path within `lib/`, its directory names joined
     # by `.` (`gui.opengl` for a subpackage), and its directory.
@@ -86,7 +86,7 @@ module Zane
     # key it imports it by, its name (packages.md §4.3): a top-level package
     # imports the other top-level ones and its own subpackages, and a
     # subpackage its own subpackages and every top-level package but the
-    # one it lies within.
+    # top-level package it lies within.
     def keys(library : Lib) : Array({String, Lib})
       children = @libs.select { |l| l.parent == library.path }
       tops = top_libs.reject { |l| l.path == library.top }

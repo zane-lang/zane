@@ -27,7 +27,7 @@ commit and reuses the successful builds. A tag pointing elsewhere, or a draft
 or published release for that tag, is refused.
 
 If uploading fails, inspect and finish the draft, or remove the draft before
-retrying the failed job. Keep its tag; never replace a published version's
+retrying the failed job. Keep the draft's tag; never replace a published version's
 tag or assets.
 
 ## What the installers do

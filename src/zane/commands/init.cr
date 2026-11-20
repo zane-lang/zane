@@ -9,7 +9,7 @@ require "../project"
 module Zane::Commands
   # `zane init [dir]`: creates a project (docs/design/cli.md §2.1).
   class Init
-    # What the project starts with: a library package with a test package
+    # The packages the project starts with: a library package with a test package
     # for it, or a program package (spec packages.md §2.1).
     enum Start
       Library
@@ -33,7 +33,7 @@ module Zane::Commands
     @git = true
     @yes = false
 
-    # *interactive* says whether questions may be asked; it is false when
+    # *interactive* is true when questions may be asked, and false when
     # standard input is not a terminal. *compiler_url* is where releases are
     # looked up and *toolchains* where they are installed; tests change both.
     def initialize(args : Array(String), @input : IO, @output : IO, @interactive : Bool,
