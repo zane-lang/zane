@@ -169,6 +169,16 @@ module Zane::Commands
       keyed(flags, Project::TEST_PACKAGE, Project::TEST_PACKAGE)
     end
 
+    # The builds `zane check` checks, each named as its progress line names
+    # it: the library packages, each program and each test package.
+    private def checked_builds : Array({String, Array(String)})
+      builds = [] of {String, Array(String)}
+      builds << {"the library packages", library_build} unless layout.libs.empty?
+      layout.programs.each { |p| builds << {"bin/#{p.name}/", program_build(p)} }
+      layout.tests.each { |t| builds << {"test/#{t.label}/", test_build(t)} }
+      builds
+    end
+
     # Once any `--import` is given, each package imports through its keys
     # alone (compiler docs/design/separate-compilation.md C10). A build
     # whose packages import nothing gives the first package its own name as its
@@ -275,18 +285,6 @@ module Zane::Commands
     end
 
     abstract def run : Int32
-  end
-
-  abstract class ProjectCommand
-    # The builds `zane check` checks, each named as its progress line names
-    # it: the library packages, each program and each test package.
-    private def checked_builds : Array({String, Array(String)})
-      builds = [] of {String, Array(String)}
-      builds << {"the library packages", library_build} unless layout.libs.empty?
-      layout.programs.each { |p| builds << {"bin/#{p.name}/", program_build(p)} }
-      layout.tests.each { |t| builds << {"test/#{t.label}/", test_build(t)} }
-      builds
-    end
   end
 
   # `zane check` (§2.2): semantics and nothing after it, for the library

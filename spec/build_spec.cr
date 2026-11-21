@@ -322,6 +322,15 @@ describe Zane::Commands do
     end
   end
 
+  it "reports a project's broken manifest rather than serving it with another compiler" do
+    with_project do |root|
+      File.write(root / "zane.coda", "version-pattern v*.+.++\n")
+      expect_raises(Zane::UserError, "has no `zane-version` field") do
+        Zane::Commands::Lsp.new([] of String, IO::Memory.new, root / "bin", Zane::Home.toolchains).compiler
+      end
+    end
+  end
+
   it "reports a compiler that has no language server" do
     with_project do |root|
       ENV["FAKE_NO_LSP"] = "1"

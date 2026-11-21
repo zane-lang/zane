@@ -15,10 +15,24 @@ module Zane::Commands
     end
 
     # The compiler of the project the editor started the server in, or,
-    # outside any project, the newest one installed.
+    # outside any project, the newest one installed. A project whose
+    # manifest is wrong is reported, as every other command reports it.
     def compiler : Compiler
-      workspace = Workspace.find(@dir) rescue nil
-      workspace ? Compiler.locate(workspace.zane_version, @toolchains) : Compiler.locate_newest(@toolchains)
+      if root = project_root
+        Compiler.locate(Workspace.load(root).zane_version, @toolchains)
+      else
+        Compiler.locate_newest(@toolchains)
+      end
+    end
+
+    # The nearest directory, *@dir* or one above it, that holds a manifest.
+    private def project_root : Path?
+      dir = @dir.expand
+      loop do
+        return dir if File.file?(dir / Workspace::MANIFEST)
+        return nil if dir.parent == dir
+        dir = dir.parent
+      end
     end
 
     def run : Int32
