@@ -130,7 +130,7 @@ module Zane::Commands
     # A library build, with no root, which checks every library package.
     private def library_build : Array(String)
       first = layout.libs.first
-      keyed(compiler.root_flags(false) + library_flags(graph), first.path, first.name)
+      keyed(Compiler.root_flags(false) + library_flags(graph), first.path, first.name)
     end
 
     # How much memory each thread of execution's nested scopes may take, as
@@ -153,7 +153,7 @@ module Zane::Commands
     private def program_build(program : Layout::Program) : Array(String)
       g = graph
       own = layout.program_keys.map { |key, target| {key, target.path} }
-      flags = compiler.root_flags(true) + region_flags + build_argument_flags + ["--package", "#{program.name}=#{program.dir}"] + library_flags(g) +
+      flags = Compiler.root_flags(true) + region_flags + build_argument_flags + ["--package", "#{program.name}=#{program.dir}"] + library_flags(g) +
               g.keyed(program.name, own + g.public_keys(g.direct))
       keyed(flags, program.name, program.name)
     end
@@ -164,9 +164,19 @@ module Zane::Commands
     private def test_build(test : Layout::Test) : Array(String)
       g = test_graph
       own = layout.test_keys(test).map { |key, target| {key, target.path} }
-      flags = compiler.root_flags(true) + region_flags + build_argument_flags + ["--package", "#{Project::TEST_PACKAGE}=#{test.dir}"] + library_flags(g) +
+      flags = Compiler.root_flags(true) + region_flags + build_argument_flags + ["--package", "#{Project::TEST_PACKAGE}=#{test.dir}"] + library_flags(g) +
               g.keyed(Project::TEST_PACKAGE, own + g.public_keys(g.direct + g.test_direct))
       keyed(flags, Project::TEST_PACKAGE, Project::TEST_PACKAGE)
+    end
+
+    # The builds `zane check` checks, each named as its progress line names
+    # it: the library packages, each program and each test package.
+    private def checked_builds : Array({String, Array(String)})
+      builds = [] of {String, Array(String)}
+      builds << {"the library packages", library_build} unless layout.libs.empty?
+      layout.programs.each { |p| builds << {"bin/#{p.name}/", program_build(p)} }
+      layout.tests.each { |t| builds << {"test/#{t.label}/", test_build(t)} }
+      builds
     end
 
     # Once any `--import` is given, each package imports through its keys
@@ -285,10 +295,7 @@ module Zane::Commands
     end
 
     def run : Int32
-      builds = [] of {String, Array(String)}
-      builds << {"the library packages", library_build} unless layout.libs.empty?
-      layout.programs.each { |p| builds << {"bin/#{p.name}/", program_build(p)} }
-      layout.tests.each { |t| builds << {"test/#{t.label}/", test_build(t)} }
+      builds = checked_builds
       compile_commands(builds.map(&.[1])) if c_code?
       builds.each do |what, flags|
         status = Progress.current.run("Checking #{what}", "Checked #{what}", @output, diagnostics) do |output, error|
@@ -503,6 +510,24 @@ module Zane::Commands
       0
     rescue error : File::Error
       raise UserError.new("cannot remove #{error.file}: #{error.os_error.try(&.message) || error.message}")
+    end
+  end
+end
+
+module Zane::Commands
+  # `zane builds` (§2.7): the builds `zane check` checks, as JSON on
+  # standard output, for an editor's language server to check the project
+  # as `zane check` does. Each build has the label `zane check` shows and the
+  # compiler flags it passes, without `--check`.
+  class Builds < ProjectCommand
+    def usage : String
+      "usage: zane builds"
+    end
+
+    def run : Int32
+      builds = checked_builds.map { |label, flags| {"label" => label, "flags" => flags} }
+      @output.puts({"builds" => builds}.to_json)
+      0
     end
   end
 end

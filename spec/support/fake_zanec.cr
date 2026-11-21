@@ -20,11 +20,31 @@ require "json"
 #   - `--write-backs OUT` writes `FAKE_WRITE_BACKS` to OUT, or a file naming no
 #     place when that is unset. With `FAKE_NO_WRITE_BACKS` set, it exits with
 #     2, as a compiler that has no such flag does.
+# - `--lsp --zane ZANE` logs its arguments, writes `log: ` to standard error
+#   and copies standard input to standard output. With `FAKE_NO_LSP` set, it
+#   prints its usage and exits with 2, as a compiler with no language server
+#   does. With `FAKE_LSP_LOG_BYTES` set, it writes that many bytes to
+#   standard error instead of copying, and exits.
 # - Run as the program that `--build` produced, it prints its arguments and
 #   exits with `FAKE_PROGRAM_STATUS`. With `FAKE_PROGRAM_TIER` set, it first
 #   waits for the file `ZANE_TIER_UP` names, and writes that name to
 #   `FAKE_PROGRAM_TIER`.
-if ARGV.first? == "--rewrite"
+if ARGV.first? == "--lsp"
+  if ENV["FAKE_NO_LSP"]?
+    STDERR.puts "usage: zanec [--cst|--sst] (SOURCE|-)"
+    exit 2
+  end
+  if log = ENV["FAKE_ZANEC_LOG"]?
+    File.open(log, "a") { |f| f.puts ARGV.join(" ") }
+  end
+  STDERR.puts "log: started"
+  if bytes = ENV["FAKE_LSP_LOG_BYTES"]?
+    STDERR.write(Bytes.new(bytes.to_i, 'x'.ord.to_u8))
+    STDERR.flush
+    exit 0
+  end
+  IO.copy(STDIN, STDOUT)
+elsif ARGV.first? == "--rewrite"
   if log = ENV["FAKE_ZANEC_LOG"]?
     File.open(log, "a") { |f| f.puts ARGV.join(" ") }
   end

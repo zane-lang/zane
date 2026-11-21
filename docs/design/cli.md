@@ -27,6 +27,7 @@ belongs to the compiler instead.
 | Resolving tags, verifying commits and archive hashes | Linking a program with the runtime it carries |
 | The global package cache | Cross-compilation for `--target` |
 | Installing compilers and running the pinned one, and updating itself (§4.2) | Writing a library's objects for a release |
+| Listing a project's builds for an editor, and starting the language server (§2.7, §2.8) | The language server: what an editor shows of a project's code |
 
 The interface between the two is a contract (§5). A change to it is the one
 kind of change that can break a project nobody touched.
@@ -241,6 +242,39 @@ testing library in `test-deps` decides how failures are counted and shown.
 ### 2.6 `zane clean`
 
 Deletes `out/`.
+
+### 2.7 `zane builds`
+
+Prints the builds `zane check` checks, as one JSON object on standard output,
+and runs no compiler:
+
+```json
+{"builds": [{"label": "the library packages", "flags": ["--no-root", "--package", "geo=/p/lib/geo", "..."]},
+            {"label": "bin/app/", "flags": ["--root", "--package", "app=/p/bin/app", "..."]}]}
+```
+
+Each build has the label `zane check` shows for it and the flags `check`
+passes the compiler (§5), without `--check`. The language server (§2.8) runs
+`zane builds` in each project an editor opens and checks each file in the
+first build that holds it, so an editor shows the problems `zane check`
+reports. Like `check`, `builds` fetches what the project's graph needs
+first, and its progress and warnings go to standard error.
+
+### 2.8 `zane lsp`
+
+Runs the language server an editor starts for Zane files: the compiler's own
+server, `zanec --lsp --zane ZANE`, on `zane lsp`'s standard input and output,
+with `ZANE` the path of this `zane`, which the server runs as `zane builds`
+(§2.7). The server's log passes through to standard error.
+
+Started inside a project, `zane lsp` runs the project's compiler, as every
+other command does. Started anywhere else, it runs the compiler
+`ZANE_COMPILER` names, then the newest toolchain installed, then `zanec` on
+`PATH`. A compiler released before the language server prints its usage
+for `--lsp`, and `zane lsp` then says so and names `zane toolchain update`.
+The server itself, and what it offers an editor, is described in the
+compiler's
+[`language-server.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/language-server.md).
 
 ---
 
@@ -504,6 +538,8 @@ which only `zane` reads off the directories, so the contract is:
   [`lowering.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/lowering.md)
   §9, "Snapshots"). A compiler that refuses `--write-backs`, one released
   before it, builds every dependency for any program, as §3 says.
+- **`--lsp --zane ZANE`** runs the language server on standard input and
+  output, running `ZANE builds` in each project it serves (§2.8).
 - **`--rewrite STAMP INPUT OUTPUT`** writes the object `INPUT` with every `!`
   in its symbols replaced by `STAMP`, for ELF, Mach-O and COFF objects, and
   a file of C module hashes with every `!` of its packages replaced so. It is
@@ -546,8 +582,12 @@ subpackage it tests
    Built.
 6. **Inspection.** `inspect` and its six views, with `--optimize` and
    `--target` for the views of a build (§4). Built.
+7. **Editors.** `builds` and `lsp`, which start the compiler's language
+   server on a project's builds (§2.7, §2.8). Built.
 
 `zane` runs the first compiler it finds among these, in this order: the
 compiler `ZANE_COMPILER` names, the toolchain installed for the project's
-`zane-version` (§4.1), and `zanec` on `PATH`. A compiler selected by
+`zane-version` (§4.1), and `zanec` on `PATH`; `zane lsp` outside any
+project takes the newest toolchain installed in place of the project's
+(§2.8). A compiler selected by
 `ZANE_COMPILER` or `PATH` is not checked against the project's pin.
