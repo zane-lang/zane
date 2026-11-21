@@ -1,11 +1,12 @@
 require "./build"
 
 module Zane::Commands
-  # `zane inspect VIEW [PROGRAM] [--optimize] [--target TRIPLE]`
-  # (docs/design/cli.md §4): one of the pinned compiler's debug views of a
-  # program, printed. `decls`, `tst`, `cgt` and `ll` view the program's
-  # build, given the packages `zane build` gives it, and `--optimize` and
-  # `--target` show that build as `zane build` makes it. `cst` and `sst`
+  # `zane inspect VIEW [PROGRAM] [--optimize] [--target TRIPLE]
+  # [--build-argument ARGUMENT ...]` (docs/design/cli.md §4): one of the
+  # pinned compiler's debug views of a program, printed. `decls`, `tst`,
+  # `cgt` and `ll` view the program's build, given the packages `zane build`
+  # gives it, and `--optimize`, `--target` and `--build-argument` show that
+  # build as `zane build` makes it. `cst` and `sst`
   # view one source file at a time, and are printed for every file of the
   # program package, in name order.
   class Inspect < ProjectCommand
@@ -18,12 +19,13 @@ module Zane::Commands
     @target : String? = nil
 
     def usage : String
-      "usage: zane inspect cst|sst|decls|tst|cgt|ll [PROGRAM] [--optimize] [--target TRIPLE]"
+      "usage: zane inspect cst|sst|decls|tst|cgt|ll [PROGRAM] [--optimize] [--target TRIPLE] [--build-argument ARGUMENT ...]"
     end
 
     private def options(p : OptionParser) : Nil
       p.on("--optimize", "Show the build an optimized build makes, as `zane build` does") { @optimize = true }
       p.on("--target TRIPLE", "The LLVM target triple to build for, instead of the host") { |v| @target = v }
+      build_argument_option(p)
     end
 
     private def positional(rest : Array(String)) : Nil
@@ -44,8 +46,8 @@ module Zane::Commands
       program = chosen.first
       view = @view.not_nil!
       if FILE_VIEWS.includes?(view)
-        if @optimize || @target
-          raise UserError.new("#{view} views a source file, which is the same however it is built; --optimize and --target apply to #{BUILD_VIEWS.join(", ")}")
+        if @optimize || @target || !@build_arguments.empty?
+          raise UserError.new("#{view} views a source file, which is the same however it is built; --optimize, --target and --build-argument apply to #{BUILD_VIEWS.join(", ")}")
         end
         files(program, view)
       else

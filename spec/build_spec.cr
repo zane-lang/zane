@@ -330,6 +330,34 @@ describe Zane::Commands do
     end
   end
 
+  it "passes the build's arguments, in order, to every run of a program's or test package's build" do
+    files = {"bin/demo/main.zn" => "package demo;\n", "test/math/main.zn" => "package test;\n"}
+    with_project(files) do |root, log|
+      given = ["--build-argument", "alpha", "--build-argument", "beta gamma"]
+      passed = "--build-argument alpha --build-argument beta gamma --package"
+      zane(Zane::Commands::Build, given, root)[0].should eq 0
+      logged(log).last.should start_with "--build #{root / "out" / "host" / "demo#{EXE}"} --optimize --root #{passed} demo="
+      File.delete(log)
+      ENV["FAKE_PROGRAM_TIER"] = (root / "tier").to_s
+      zane(Zane::Commands::Run, given + ["--", "x"], root)[0].should eq 0
+      logged(log).size.should eq 2
+      logged(log).each(&.should(contain "--root #{passed} demo="))
+      File.delete(log)
+      zane(Zane::Commands::Test, given, root)[0].should eq 0
+      logged(log).size.should eq 2
+      logged(log).each(&.should(contain "--root #{passed} test="))
+      File.delete(log)
+      zane(Zane::Commands::Inspect, ["cgt"] + given, root)[0].should eq 0
+      logged(log).should eq ["--cgt --root #{passed} demo=#{root / "bin" / "demo"} --import demo:demo=demo"]
+      expect_raises(Zane::UserError, "--optimize, --target and --build-argument apply to decls, tst, cgt, ll") do
+        zane(Zane::Commands::Inspect, ["cst"] + given, root)
+      end
+      expect_raises(Zane::UserError, "unknown option --build-argument") do
+        zane(Zane::Commands::Check, given, root)
+      end
+    end
+  end
+
   it "refuses a region size that is not a positive whole number of MiB or GiB" do
     ["fixed-region", "spawned-fixed-region"].each do |field|
       ["256", "0MiB", "00MiB", "000GiB", "1.5GiB", "256mib", "99999999999999999999GiB"].each do |size|
@@ -544,7 +572,7 @@ describe Zane::Commands do
         program ran with [--sst, #{root / "bin" / "demo" / "b.zn"}]
 
         TEXT
-      expect_raises(Zane::UserError, "--optimize and --target apply to decls, tst, cgt, ll") do
+      expect_raises(Zane::UserError, "--optimize, --target and --build-argument apply to decls, tst, cgt, ll") do
         zane(Zane::Commands::Inspect, ["cst", "--optimize"], root)
       end
     end

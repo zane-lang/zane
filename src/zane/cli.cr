@@ -17,11 +17,13 @@ module Zane::CLI
       check                  check the project without building it
       build [program]        build every program in bin/, or the one named, into out/
       run [program]          build a program, then run it
-      test [test]            build and run every test package in test/, or the one named
+      test [test]            build and run every test package in test/, or the one named;
+                             build, run and test take --build-argument ARGUMENT, any
+                             number of times, which comptime calls read as arguments
       clean                  delete out/
       inspect <view> [program]  print the compiler's view of a program: cst, sst, decls,
-                             tst, cgt or ll; the last four also take --optimize and
-                             --target TRIPLE, as zane build does
+                             tst, cgt or ll; the last four also take --optimize,
+                             --target TRIPLE and --build-argument, as zane build does
       add <url> [tag]        depend on the library at url, at its newest tag or the one named;
                              with --test, for the test package alone; with --from-source,
                              compiled here, which also switches a library already added;
