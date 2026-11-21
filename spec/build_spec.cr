@@ -10,9 +10,12 @@ FAKE_ZANEC = begin
 end
 
 # The zane under test, built once, for a command that must run as its own
-# process, as `zane lsp` does to name itself to the server.
+# process, as `zane lsp` does to name itself to the server. The path starts
+# from the temporary directory's real path, since the executable path a
+# process reports has its symbolic links resolved (on macOS, `/var` links to
+# `/private/var`).
 ZANE_BINARY = begin
-  path = File.join(Dir.tempdir, "zane-spec-zane-#{Process.pid}#{{{ flag?(:win32) ? ".exe" : "" }}}")
+  path = File.join(File.realpath(Dir.tempdir), "zane-spec-zane-#{Process.pid}#{{{ flag?(:win32) ? ".exe" : "" }}}")
   status = Process.run("crystal", ["build", "src/zane.cr", "-o", path], error: Process::Redirect::Inherit)
   raise "cannot build zane" unless status.success?
   path
