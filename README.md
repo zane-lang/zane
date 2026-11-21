@@ -150,6 +150,7 @@ zane test
 | `zane update [key [tag]]` | Move dependencies to a newer tag |
 | `zane remove <key>` | Drop a dependency |
 | `zane tree` | Show what the project depends on |
+| `zane lsp` | Run the language server an editor starts for Zane files |
 | `zane toolchain install [version]` | Install a compiler |
 | `zane toolchain update [version]` | Move the project to another compiler |
 | `zane self update [version]` | Update `zane` itself |

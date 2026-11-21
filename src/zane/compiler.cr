@@ -16,8 +16,12 @@ module Zane
     # The flag that marks whether a build has a root package: a program's or
     # a test's build has one, a library build has none (spec packages.md
     # §6.1).
-    def root_flags(root : Bool) : Array(String)
+    def self.root_flags(root : Bool) : Array(String)
       [root ? "--root" : "--no-root"]
+    end
+
+    def root_flags(root : Bool) : Array(String)
+      Compiler.root_flags(root)
     end
 
     # The compiler for a project built by *zane_version*, from the first of:
@@ -38,6 +42,24 @@ module Zane
       raise UserError.new(
         "the project is built by the compiler #{zane_version}, which is not installed, " \
         "and no zanec is on PATH; set ZANE_COMPILER to the compiler to use")
+    end
+
+    # The compiler for an editor's language server started outside any
+    # project, from the first of: `ZANE_COMPILER`, the newest toolchain
+    # installed, and `zanec` on `PATH`.
+    def self.locate_newest(toolchains : Path = Home.toolchains) : Compiler
+      if path = ENV["ZANE_COMPILER"]?.presence
+        return new(path) if File.file?(path)
+        raise UserError.new("ZANE_COMPILER names #{path}, which is not a file")
+      end
+      newest = CompilerRelease.installed(toolchains).keys
+        .select { |tag| File.file?(toolchains / tag / "bin" / EXECUTABLE) }
+        .max_by? { |tag| CompilerRelease.version(tag).not_nil! }
+      return new((toolchains / newest / "bin" / EXECUTABLE).to_s) if newest
+      if found = Process.find_executable("zanec")
+        return new(found)
+      end
+      raise UserError.new("no compiler is installed and no zanec is on PATH; install one with `zane toolchain install`")
     end
 
     # Runs the compiler, its output going to *output* and *error*, and

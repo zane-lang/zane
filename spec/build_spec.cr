@@ -9,8 +9,17 @@ FAKE_ZANEC = begin
   path
 end
 
+# The zane under test, built once, for a command that must run as its own
+# process, as `zane lsp` does to name itself to the server.
+ZANE_BINARY = begin
+  path = File.join(Dir.tempdir, "zane-spec-zane-#{Process.pid}#{{{ flag?(:win32) ? ".exe" : "" }}}")
+  status = Process.run("crystal", ["build", "src/zane.cr", "-o", path], error: Process::Redirect::Inherit)
+  raise "cannot build zane" unless status.success?
+  path
+end
+
 # The variables a project example sets, restored after it.
-PROJECT_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS FAKE_PROGRAM_TIER FAKE_TIER_HANG FAKE_WRITE_BACKS FAKE_NO_WRITE_BACKS)
+PROJECT_ENV = %w(ZANE_COMPILER FAKE_NO_LSP FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS FAKE_PROGRAM_TIER FAKE_TIER_HANG FAKE_WRITE_BACKS FAKE_NO_WRITE_BACKS)
 
 # Where tier 1 of a program built into *path* goes (Commands::ProjectCommand#tier_library).
 TIER = {{ flag?(:win32) ? ".dll" : flag?(:darwin) ? ".dylib" : ".so" }}
@@ -207,6 +216,28 @@ describe Zane::Compiler do
       FileUtils.rm_rf(home)
     end
   end
+
+  it "outside any project, takes the newest toolchain installed, then PATH" do
+    home = Path[File.join(Dir.tempdir, "zane-spec-toolchains-#{Random::Secure.hex(4)}")]
+    path, compiler = ENV["PATH"]?, ENV["ZANE_COMPILER"]?
+    begin
+      ENV.delete("ZANE_COMPILER")
+      ENV["PATH"] = home.to_s
+      expect_raises(Zane::UserError, "no compiler is installed and no zanec is on PATH") do
+        Zane::Compiler.locate_newest(home)
+      end
+      %w(v0.9 v0.12 v0.10).each do |tag|
+        Dir.mkdir_p(home / tag / "bin")
+        File.copy(FAKE_ZANEC, home / tag / "bin" / Zane::Compiler::EXECUTABLE)
+        File.write(home / tag / Zane::CompilerRelease::RECORD, "url #{Zane::CompilerRelease::URL}\ncommit c\n")
+      end
+      Zane::Compiler.locate_newest(home).path.should eq (home / "v0.12" / "bin" / Zane::Compiler::EXECUTABLE).to_s
+    ensure
+      path ? (ENV["PATH"] = path) : ENV.delete("PATH")
+      compiler ? (ENV["ZANE_COMPILER"] = compiler) : ENV.delete("ZANE_COMPILER")
+      FileUtils.rm_rf(home)
+    end
+  end
 end
 
 describe Zane::Commands do
@@ -265,6 +296,38 @@ describe Zane::Commands do
     with_project do |root, log|
       zane(Zane::Commands::Check, [] of String, root).should eq({0, "", ""})
       File.exists?(root / "compile_commands.json").should be_false
+    end
+  end
+
+  it "lists the builds check checks, as JSON, without running the compiler" do
+    with_project(LAYOUT) do |root, log|
+      status, output, error = zane(Zane::Commands::Builds, [] of String, root)
+      {status, error}.should eq({0, ""})
+      builds = JSON.parse(output)["builds"].as_a
+      builds.map(&.["label"].as_s).should eq ["the library packages", "bin/viewer/", "test/gui/opengl/", "test/math/"]
+      builds.map(&.["flags"].as_a.map(&.as_s).join(" ")).first.should eq "--no-root #{library_flags(root)}"
+      logged(log).should be_empty
+    end
+  end
+
+  it "runs the project's compiler as the language server, naming this zane to it" do
+    with_project do |root, log|
+      input = IO::Memory.new("Content-Length: 2\r\n\r\n{}")
+      output, error = IO::Memory.new, IO::Memory.new
+      status = Process.run(ZANE_BINARY, ["lsp"], chdir: root.to_s, input: input, output: output, error: error).exit_code
+      status.should eq 0
+      output.to_s.should eq "Content-Length: 2\r\n\r\n{}"
+      error.to_s.should contain "log: started\n"
+      logged(log).should eq ["--lsp --zane #{ZANE_BINARY}"]
+    end
+  end
+
+  it "reports a compiler that has no language server" do
+    with_project do |root|
+      ENV["FAKE_NO_LSP"] = "1"
+      expect_raises(Zane::UserError, "the compiler at #{FAKE_ZANEC} has no language server") do
+        Zane::Commands::Lsp.new([] of String, IO::Memory.new, root, Zane::Home.toolchains).run
+      end
     end
   end
 

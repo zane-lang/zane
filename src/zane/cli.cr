@@ -6,6 +6,7 @@ require "./commands/cache"
 require "./commands/deps"
 require "./commands/init"
 require "./commands/inspect"
+require "./commands/lsp"
 require "./commands/self"
 require "./commands/toolchain"
 
@@ -21,6 +22,8 @@ module Zane::CLI
                              build, run and test take --build-argument ARGUMENT, any
                              number of times, which comptime calls read as arguments
       clean                  delete out/
+      builds                 print the builds check checks, as JSON, for a language server
+      lsp                    run the language server an editor starts
       inspect <view> [program]  print the compiler's view of a program: cst, sst, decls,
                              tst, cgt or ll; the last four also take --optimize,
                              --target TRIPLE and --build-argument, as zane build does
@@ -69,6 +72,8 @@ module Zane::CLI
       when "run"       then Commands::Run.new(args[1..], stdout, stderr).run
       when "test"      then Commands::Test.new(args[1..], stdout, stderr).run
       when "clean"     then Commands::Clean.new(args[1..], stdout, stderr).run
+      when "builds"    then Commands::Builds.new(args[1..], stdout, stderr).run
+      when "lsp"       then Commands::Lsp.new(args[1..], stderr).run
       when "inspect"   then Commands::Inspect.new(args[1..], stdout, stderr).run
       when "add"       then Commands::Add.new(args[1..], stdout, stderr).run
       when "fetch"     then Commands::Fetch.new(args[1..], stdout, stderr).run
