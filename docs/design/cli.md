@@ -160,7 +160,7 @@ compiler, lists the directories: a `.zn` file directly in one of the three, a
 program package with a subdirectory of sources, a nested test package that
 mirrors no subpackage, and the names a project keeps apart.
 
-### 2.3 `zane build [PROGRAM] [--target T] [-o OUT]`
+### 2.3 `zane build [PROGRAM] [--target T] [-o OUT] [--build-argument A ...]`
 
 Resolves and fetches dependencies
 ([`dependencies.md` §13](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#13-build-flow)),
@@ -187,7 +187,21 @@ There is no `32GiB` cap: native addresses let the runtime reserve whatever
 range the target system permits. A dependency's manifest cannot set either
 ([`dependencies.md` §2.1](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#21-manifest-zanecoda)).
 
-### 2.4 `zane run [PROGRAM] [-- ARGS]`
+`--build-argument A`, given any number of times, adds `A` to the arguments
+the build is started with, in order: inside a call marked `comptime`, the
+runtime's `arguments` gives them
+([`effects.md` §5.6](https://github.com/zane-lang/spec/blob/main/spec/effects.md#56-explicit-compile-time-evaluation)).
+`build`, `run`, `test` and `inspect` take it, and pass it to every compiler
+run of the program's or test package's own build, both tiers of `run` and
+`test` included, so the two tiers compute the same values. Only the root
+package reaches the runtime
+([`packages.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#61-program-and-test-packages-are-roots)),
+so a dependency's marked calls never read the build's arguments, its object
+is compiled without them, and the cache keeps it whatever they are. With
+none given, nothing is passed, so a compiler released before `comptime`
+still builds the project.
+
+### 2.4 `zane run [PROGRAM] [--build-argument A ...] [-- ARGS]`
 
 Builds a program package for the host into `out/run/<name>`, then runs it with
 `ARGS` and exits with its status. In a project with several programs, you name
@@ -206,7 +220,7 @@ in its cache, so a program run again unchanged takes optimized code within
 its first moments. The program behaves the same either way, so only its speed
 differs from the program `build` makes.
 
-### 2.5 `zane test [TEST] [-- ARGS]`
+### 2.5 `zane test [TEST] [--build-argument A ...] [-- ARGS]`
 
 Builds every test package in `test/`, or only the test package named by its
 directory under `test/`, such as `gui/opengl`, for the host into `out/test/`,
@@ -370,7 +384,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and `zane-commit` together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than `zane-commit` pins has moved, and is refused with a security error without the flag. |
 | `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named (§4.2). Works outside a project and changes none. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
-| `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T]` | One of the pinned compiler's debug views of a program, printed, for the project's only program or, when there are several, the program you name. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize` and `--target` show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
+| `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T] [--build-argument A ...]` | One of the pinned compiler's debug views of a program, printed, for the project's only program or, when there are several, the program you name. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize`, `--target` and `--build-argument` (§2.3) show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
 What a release produces for a project's programs is not designed yet.
 
@@ -456,6 +470,9 @@ which only `zane` reads off the directories, so the contract is:
   spawned call's, passed in bytes after converting the manifest's whole
   number of `MiB` or `GiB`. `zane` passes them only for a
   manifest that sets them; the compiler's default stands for the other.
+- **`--build-argument A`**, any number of times, given to a program's or a
+  test package's build only when the user gives it (§2.3): the arguments
+  the build is started with, which a `comptime` call reads.
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
   `T` is spelled as `zig cc` reads it; the compiler hands LLVM its normal
   form and the C compiler the triple as written.

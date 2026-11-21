@@ -32,6 +32,7 @@ module Zane::Commands
     @graph : Graph? = nil
     @test_graph : Graph? = nil
     @diagnostics : Warnings? = nil
+    @build_arguments = [] of String
 
     # *dir* is where the command runs from, and *toolchains* where compilers
     # are installed; tests change both.
@@ -55,6 +56,21 @@ module Zane::Commands
     end
 
     private def options(p : OptionParser) : Nil
+    end
+
+    # `--build-argument ARGUMENT`, which `build`, `run`, `test` and
+    # `inspect` take, any number of times: the arguments the build is started
+    # with, which the runtime's `arguments` gives inside a call marked
+    # `comptime` (spec effects.md §5.6, §6.6).
+    private def build_argument_option(p : OptionParser) : Nil
+      p.on("--build-argument ARGUMENT", "An argument the build is started with, which `comptime` calls read; repeatable") { |v| @build_arguments << v }
+    end
+
+    # The build's arguments as the compiler takes them, in the order given.
+    # Nothing is passed when none is given, so a compiler released before
+    # `comptime` still builds the project.
+    private def build_argument_flags : Array(String)
+      @build_arguments.flat_map { |a| ["--build-argument", a] }
     end
 
     # The arguments before `--`. Only `build`, `run` and `test` take one.
@@ -131,11 +147,13 @@ module Zane::Commands
 
     # A program's build: the program package first, the root, with the
     # project's top-level library packages and its dependencies' public
-    # packages to import.
+    # packages to import, started with the build's arguments. Only the root
+    # reaches the runtime (spec packages.md §6.1), so a dependency's object
+    # never reads them, and the cache keeps it whatever they are.
     private def program_build(program : Layout::Program) : Array(String)
       g = graph
       own = layout.program_keys.map { |key, target| {key, target.path} }
-      flags = compiler.root_flags(true) + region_flags + ["--package", "#{program.name}=#{program.dir}"] + library_flags(g) +
+      flags = compiler.root_flags(true) + region_flags + build_argument_flags + ["--package", "#{program.name}=#{program.dir}"] + library_flags(g) +
               g.keyed(program.name, own + g.public_keys(g.direct))
       keyed(flags, program.name, program.name)
     end
@@ -146,7 +164,7 @@ module Zane::Commands
     private def test_build(test : Layout::Test) : Array(String)
       g = test_graph
       own = layout.test_keys(test).map { |key, target| {key, target.path} }
-      flags = compiler.root_flags(true) + region_flags + ["--package", "#{Project::TEST_PACKAGE}=#{test.dir}"] + library_flags(g) +
+      flags = compiler.root_flags(true) + region_flags + build_argument_flags + ["--package", "#{Project::TEST_PACKAGE}=#{test.dir}"] + library_flags(g) +
               g.keyed(Project::TEST_PACKAGE, own + g.public_keys(g.direct + g.test_direct))
       keyed(flags, Project::TEST_PACKAGE, Project::TEST_PACKAGE)
     end
@@ -338,7 +356,7 @@ module Zane::Commands
     end
   end
 
-  # `zane build [PROGRAM] [--target T] [-o OUT]` (§2.3): every program
+  # `zane build [PROGRAM] [--target T] [-o OUT] [--build-argument A ...]` (§2.3): every program
   # package, or only the program you name.
   class Build < ProjectCommand
     @target : String? = nil
@@ -346,12 +364,13 @@ module Zane::Commands
     @program : String? = nil
 
     def usage : String
-      "usage: zane build [PROGRAM] [--target TRIPLE] [-o OUT]"
+      "usage: zane build [PROGRAM] [--target TRIPLE] [-o OUT] [--build-argument ARGUMENT ...]"
     end
 
     private def options(p : OptionParser) : Nil
       p.on("--target TRIPLE", "The LLVM target triple to build for, instead of the host") { |v| @target = v }
       p.on("-o OUT", "Where to write the program, instead of out/<target>/<name>") { |v| @path = Path[v].expand }
+      build_argument_option(p)
     end
 
     private def positional(rest : Array(String)) : Nil
@@ -378,7 +397,7 @@ module Zane::Commands
     end
   end
 
-  # `zane run [PROGRAM] [-- ARGS]` (§2.4): builds a program for the host
+  # `zane run [PROGRAM] [--build-argument A ...] [-- ARGS]` (§2.4): builds a program for the host
   # and runs it with *ARGS*, starting it as soon as the faster build is
   # made (`build_and_run`), and exits with its status. It builds into
   # `out/run/`, so it never replaces what `zane build` made.
@@ -387,7 +406,11 @@ module Zane::Commands
     @program : String? = nil
 
     def usage : String
-      "usage: zane run [PROGRAM] [-- ARGS]"
+      "usage: zane run [PROGRAM] [--build-argument ARGUMENT ...] [-- ARGS]"
+    end
+
+    private def options(p : OptionParser) : Nil
+      build_argument_option(p)
     end
 
     private def positional(rest : Array(String)) : Nil
@@ -419,7 +442,11 @@ module Zane::Commands
     @test : String? = nil
 
     def usage : String
-      "usage: zane test [TEST] [-- ARGS]"
+      "usage: zane test [TEST] [--build-argument ARGUMENT ...] [-- ARGS]"
+    end
+
+    private def options(p : OptionParser) : Nil
+      build_argument_option(p)
     end
 
     private def positional(rest : Array(String)) : Nil
