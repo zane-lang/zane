@@ -19,7 +19,19 @@ ZANE_BINARY = begin
 end
 
 # The variables a project example sets, restored after it.
-PROJECT_ENV = %w(ZANE_COMPILER FAKE_NO_LSP FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS FAKE_PROGRAM_TIER FAKE_TIER_HANG FAKE_WRITE_BACKS FAKE_NO_WRITE_BACKS)
+# An error stream whose every write fails, as an editor's does once it has
+# closed its end.
+class BrokenIO < IO
+  def read(slice : Bytes) : Int32
+    0
+  end
+
+  def write(slice : Bytes) : Nil
+    raise IO::Error.new("the editor closed its error stream")
+  end
+end
+
+PROJECT_ENV = %w(ZANE_COMPILER FAKE_NO_LSP FAKE_LSP_LOG_BYTES FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_PROGRAM_STATUS FAKE_PROGRAM_TIER FAKE_TIER_HANG FAKE_WRITE_BACKS FAKE_NO_WRITE_BACKS)
 
 # Where tier 1 of a program built into *path* goes (Commands::ProjectCommand#tier_library).
 TIER = {{ flag?(:win32) ? ".dll" : flag?(:darwin) ? ".dylib" : ".so" }}
@@ -319,6 +331,14 @@ describe Zane::Commands do
       output.to_s.should eq "Content-Length: 2\r\n\r\n{}"
       error.to_s.should contain "log: started\n"
       logged(log).should eq ["--lsp --zane #{ZANE_BINARY}"]
+    end
+  end
+
+  it "keeps reading the server's log after the editor's error stream fails" do
+    with_project do |root|
+      # More than a pipe holds, so a server whose log nobody read would block.
+      ENV["FAKE_LSP_LOG_BYTES"] = "1000000"
+      Zane::Commands::Lsp.new([] of String, BrokenIO.new, root, Zane::Home.toolchains).run.should eq 0
     end
   end
 

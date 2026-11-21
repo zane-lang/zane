@@ -45,20 +45,36 @@ module Zane::Commands
         raise UserError.new("cannot run #{compiler.path}: #{error.message}")
       end
       # The server's log passes through to the editor, and its start is kept
-      # to recognise a compiler with no server, which prints its usage.
+      # to recognise a compiler with no server, which prints its usage. The
+      # fiber reads the pipe to its end before `wait` closes it, and keeps
+      # reading after a write to the editor fails, so the server never
+      # blocks on a full pipe; it signals on every path. A failed write is
+      # not reported: the editor's error stream is the only place a report
+      # could go, and that stream is what failed.
       start = IO::Memory.new
       copied = Channel(Nil).new
       spawn do
-        buffer = Bytes.new(4096)
-        while (n = process.error.read(buffer)) > 0
-          start.write(buffer[0, Math.min(n, 4096 - start.size)]) if start.size < 4096
-          @error.write(buffer[0, n])
-          @error.flush
+        failed = false
+        begin
+          buffer = Bytes.new(4096)
+          while (n = process.error.read(buffer)) > 0
+            start.write(buffer[0, Math.min(n, 4096 - start.size)]) if start.size < 4096
+            next if failed
+            begin
+              @error.write(buffer[0, n])
+              @error.flush
+            rescue IO::Error
+              failed = true
+            end
+          end
+        rescue IO::Error
+          # The pipe broke; the server has gone, and `wait` reaps it.
+        ensure
+          copied.send(nil)
         end
-        copied.send(nil)
       end
-      status = Compiler.exit_code(process.wait)
       copied.receive
+      status = Compiler.exit_code(process.wait)
       if status == 2 && start.to_s.starts_with?("usage: zanec")
         raise UserError.new("the compiler at #{compiler.path} has no language server; " \
                             "`zane toolchain update` installs the newest compiler release, which has one")
