@@ -71,6 +71,10 @@ main() {
         *":$install_dir:"*) ;;
         *) printf 'Add this directory to your PATH: %s\n' "$install_dir" ;;
     esac
+    # std goes into the package cache as `zane add` puts it there, so that
+    # `zane init` can use it when it cannot reach std.
+    "$install_dir/zane" self install-std \
+        || printf 'zane: warning: could not put the newest std in the package cache; run "zane self install-std" once online\n' >&2
     printf 'The CLI also needs a compiler: put zanec on PATH or set ZANE_COMPILER.\n'
 }
 

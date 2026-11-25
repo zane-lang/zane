@@ -40,5 +40,8 @@ passed as its argument (`sh -s -- v0.0`) installs that version.
 and the current terminal's; `-Version v0.0` chooses a version and
 `-InstallDir <folder>` another directory, passed after the installer command
 the README shows (`& ([scriptblock]::Create(...)) -InstallDir D:\Tools\zane`).
+Both then run `zane self install-std`, which checks out the newest
+[`std`](https://github.com/zane-lang/std) into the package cache, so that
+`zane init` works offline; when it fails, they warn and carry on.
 `zane self update` (`docs/design/cli.md` §4.2) replaces an installed binary
-the same way.
+the same way, and puts the newest `std` in the cache too.

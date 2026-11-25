@@ -118,12 +118,9 @@ module Zane::Commands
       tags
     end
 
-    # The highest version tag of *tags*: a `v` and dot-separated numbers,
-    # compared as numbers.
+    # The highest version tag of *tags* (`Git.newest_version`).
     private def newest(tags : Hash(String, String), url : PackageUrl) : String
-      versions = tags.keys.select(&.matches?(/\Av?\d+(\.\d+)*\z/))
-      versions.max_by? { |t| t.lchop('v').split('.').map(&.to_i64) } ||
-        raise UserError.new("#{url} has no version tags; name the tag")
+      Git.newest_version(tags) || raise UserError.new("#{url} has no version tags; name the tag")
     end
 
     # *tag* and the commit it points to now in *tags*, refused when the tag

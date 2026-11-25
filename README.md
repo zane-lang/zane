@@ -115,19 +115,18 @@ cd hello
 zane run
 ```
 
-`zane init` creates a project that pins the newest installed compiler, with a
-program in `bin/hello/main.zn`; `zane run` builds it and prints
-`hello world`.
+`zane init` creates a project that pins the newest installed compiler and the
+newest [`std`](https://github.com/zane-lang/std), which holds the `core`
+package, with a program in `bin/hello/main.zn`; `zane run` builds it and
+prints `hello world`. To try the example above, replace `bin/hello/main.zn`
+with it (keeping `package hello;` as its first line).
 
-To write code like the example above, add [`std`](https://github.com/zane-lang/std),
-which holds the `core` package, and replace
-`bin/hello/main.zn` with the example (keeping `package hello;` as its first
-line):
-
-```sh
-zane add https://github.com/zane-lang/std --from-source
-zane run
-```
+The installer and `zane self update` keep the newest `std` in zane's package
+cache, so `zane init` falls back to it when it cannot reach GitHub; with
+neither, `zane init` stops and says so. After updating from a `zane` older
+than this, run `zane self install-std` once.
+`zane init --no-std` creates a project with no dependency, whose code uses
+only the compiler's intrinsics.
 
 A **library** project keeps its code in `lib/` and its tests in `test/`:
 

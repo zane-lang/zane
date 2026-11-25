@@ -34,6 +34,24 @@ module Zane
       tags
     end
 
+    # The highest version tag of *tags* (`.versions`). Nil when none is one.
+    def self.newest_version(tags : Hash(String, String)) : String?
+      versions(tags.keys).first?
+    end
+
+    # The version tags of *tags*, highest first: a `v` and dot-separated
+    # numbers, compared as numbers. A tag with a number too large to compare
+    # is left out.
+    def self.versions(tags : Enumerable(String)) : Array(String)
+      keyed = tags.compact_map { |t| version_parts(t).try { |parts| {t, parts} } }
+      keyed.sort_by(&.[1]).reverse!.map(&.[0])
+    end
+
+    private def self.version_parts(tag : String) : Array(Int64)?
+      return nil unless tag.matches?(/\Av?\d+(\.\d+)*\z/)
+      tag.lchop('v').split('.').map { |part| part.to_i64? || return nil }
+    end
+
     # The commit *tag* points to now in the repository at *url*.
     def self.resolve(url : String, tag : String) : String
       tags(url)[tag]? || raise UserError.new("#{url} has no tag #{tag}")
