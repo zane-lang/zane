@@ -26,6 +26,17 @@ git("commit", "-q", "--allow-empty", "-m", "machine operations")
 git("tag", "v0.3")
 V03 = git("rev-parse", "HEAD")
 
+# A std repository with releases v0.9 and v0.10, which `init` pins the newest of.
+STD = File.join(Dir.tempdir, "zane-spec-std-#{Process.pid}")
+Dir.mkdir_p(STD)
+git("init", "-q", dir: STD)
+git("commit", "-q", "--allow-empty", "-m", "first", dir: STD)
+git("tag", "v0.9", dir: STD)
+git("commit", "-q", "--allow-empty", "-m", "second", dir: STD)
+git("tag", "v0.10", dir: STD)
+git("tag", "nightly", dir: STD)
+STD_V010 = git("rev-parse", "HEAD", dir: STD)
+
 private def with_tmp(&)
   dir = File.join(Dir.tempdir, "zane-spec-#{Random::Secure.hex(6)}")
   Dir.mkdir_p(dir)
@@ -36,9 +47,9 @@ private def with_tmp(&)
   end
 end
 
-private def init(args : Array(String), input = "", interactive = false, url = COMPILER) : String
+private def init(args : Array(String), input = "", interactive = false, url = COMPILER, std = STD) : String
   output = IO::Memory.new
-  Zane::Commands::Init.new(args, IO::Memory.new(input), output, interactive, url).run
+  Zane::Commands::Init.new(args, IO::Memory.new(input), output, interactive, url, std_url: std).run
   output.to_s
 end
 
@@ -132,27 +143,54 @@ describe Zane::Project do
 end
 
 describe Zane::Commands::Init do
-  it "creates an application with the newest compiler pinned" do
+  it "creates an application with the newest compiler and std pinned" do
     with_tmp do |tmp|
       output = init([(tmp / "my-app").to_s, "--no-git"])
       output.should contain "built by the compiler v0.3, the newest release."
+      output.should contain "It depends on std v0.10, compiled from source"
       root = tmp / "my-app"
 
       manifest = read_coda(root / "zane.coda")
       manifest.keys.should eq ["zane-version", "version-pattern", "deps"]
       manifest["zane-version"].should eq "v0.3"
       manifest["version-pattern"].should eq "v*.+.++"
-      manifest["deps"].should eq({"columns" => ["version", "from"], "rows" => {} of String => Hash(String, String)})
+      manifest["deps"].should eq({"columns" => ["version", "from"], "rows" => {"std" => {"version" => "v0.10", "from" => "source"}}})
 
       lock = read_coda(root / "zane-lock.coda")
       lock.keys.should eq ["zane-commit", "resolutions"]
       lock["zane-commit"].should eq V03
-      lock["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {} of String => Hash(String, String)})
+      lock["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {"std" => {"url" => STD, "commit" => STD_V010}}})
 
-      File.read(root / "bin" / "myApp" / "main.zn").should start_with "package myApp;\n"
+      source = File.read(root / "bin" / "myApp" / "main.zn")
+      source.should start_with "package myApp;\n\nimport core$;\n"
+      source.should contain "console Console(@program$console);"
+      source.should contain %(console!print("hello world");)
+      source.should_not contain "@primitives$"
       Dir.exists?(root / "test").should be_false
       File.read(root / ".gitignore").should eq "out/\ncompile_commands.json\n"
       File.exists?(root / ".git").should be_false
+    end
+  end
+
+  it "depends on nothing and uses only the intrinsics with --no-std" do
+    with_tmp do |tmp|
+      output = init([(tmp / "app").to_s, "--no-std", "--no-git"], std: "https://zane.invalid/std")
+      output.should_not contain "std"
+      root = tmp / "app"
+      read_coda(root / "zane.coda")["deps"].should eq({"columns" => ["version", "from"], "rows" => {} of String => Hash(String, String)})
+      read_coda(root / "zane-lock.coda")["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {} of String => Hash(String, String)})
+      source = File.read(root / "bin" / "app" / "main.zn")
+      source.should_not contain "import core$;"
+      source.should contain "@primitives$Unit main() {"
+    end
+  end
+
+  it "writes nothing when std cannot be reached, and suggests --no-std" do
+    with_tmp do |tmp|
+      expect_raises(Zane::UserError, "run again with --no-std") do
+        init([(tmp / "app").to_s, "--no-git"], std: (tmp / "missing").to_s)
+      end
+      File.exists?(tmp / "app").should be_false
     end
   end
 
@@ -161,7 +199,7 @@ describe Zane::Commands::Init do
       with_toolchains do
         offline = "https://zane.invalid/compiler"
         install("v0.0", V00, url: offline)
-        output = init([(tmp / "app").to_s, "--no-git"], url: offline)
+        output = init([(tmp / "app").to_s, "--no-std", "--no-git"], url: offline, std: "https://zane.invalid/std")
         output.should contain "built by the compiler v0.0, the newest one installed."
         read_coda(tmp / "app" / "zane-lock.coda")["zane-commit"].should eq V00
       end
@@ -200,12 +238,23 @@ describe Zane::Commands::Init do
       manifest = read_coda(tmp / "geo" / "zane.coda")
       manifest["zane-version"].should eq "v0.3"
       library = File.read(tmp / "geo" / "lib" / "geometry" / "geometry.zn")
-      library.should contain "package geometry;"
-      library.should contain "@primitives$I64 double(n @primitives$I64) => @operators$add(n, n);"
+      library.should start_with "package geometry;\n\nimport core$;\n"
+      library.should contain "Int double(n Int) => n + n;"
       Dir.exists?(tmp / "geo" / "bin").should be_false
       test = File.read(tmp / "geo" / "test" / "geometry" / "main.zn")
+      test.should start_with "package test;\n\nimport core$;\nimport geometry;\n"
+      test.should contain "if(geometry$double(Int(21)) ~= 42) {"
+      test.should contain %(abort @primitives$String("double(21) is not 42");)
+    end
+  end
+
+  it "writes a library and its test with only the intrinsics with --no-std" do
+    with_tmp do |tmp|
+      init([(tmp / "geo").to_s, "--lib", "--name", "geometry", "--no-std", "--no-git"])
+      library = File.read(tmp / "geo" / "lib" / "geometry" / "geometry.zn")
+      library.should contain "@primitives$I64 double(n @primitives$I64) => @operators$add(n, n);"
+      test = File.read(tmp / "geo" / "test" / "geometry" / "main.zn")
       test.should start_with "package test;\n\nimport geometry;\n"
-      test.should contain "alias I64 = @primitives$I64;"
       test.should contain "check(@operators$equal(geometry$double(I64(21)), I64(42)));"
       test.should contain "@controlflow$branch(@operators$not(ok), {"
       test.should contain %(passed String.escaped("ok\\n");)
@@ -219,7 +268,7 @@ describe Zane::Commands::Init do
         {"v0.3", "v0.10", "v1.0"}.each do |tag|
           install(tag, V03, url: offline)
           root = tmp / tag
-          init([root.to_s, "--lib", "--name", "geometry", "--no-git"], url: offline)
+          init([root.to_s, "--lib", "--name", "geometry", "--no-std", "--no-git"], url: offline, std: "https://zane.invalid/std")
           read_coda(root / "zane.coda")["zane-version"].should eq tag
           File.read(root / "lib" / "geometry" / "geometry.zn").should contain "@operators$add(n, n)"
         end
@@ -299,4 +348,4 @@ describe Zane::Commands::Init do
   end
 end
 
-Spec.after_suite { FileUtils.rm_rf(COMPILER) }
+Spec.after_suite { FileUtils.rm_rf(COMPILER); FileUtils.rm_rf(STD) }

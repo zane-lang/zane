@@ -119,16 +119,26 @@ the tag `--zane-version` names, becomes `zane-version`, and the commit that tag
 points to becomes `zane-commit`. With no release published, `init` fails.
 Either way, `init` reports which compiler it pinned and where it found it.
 
+The project depends on [`std`](https://github.com/zane-lang/std), whose `core`
+package the code `init` writes imports. `init` lists the tags of
+`https://github.com/zane-lang/std` with `git ls-remote`, as `zane add` does
+(§3), and pins the highest version tag, compiled from source. `--no-std` skips
+this, so `init` works offline: the project then has no dependency, and its code
+uses only the intrinsics. When `std` cannot be reached, `init` fails, writes
+nothing, and suggests `--no-std`.
+
 `init` writes nothing until every question is answered, so cancelling leaves the
 directory untouched. It then writes:
 
-- `zane.coda`, with `zane-version` and `version-pattern`, and an empty `deps`
-  table;
-- `zane-lock.coda`, holding `zane-commit` and an empty `resolutions` table;
-- for an application, `bin/<name>/main.zn`, a program package with a `main`;
+- `zane.coda`, with `zane-version` and `version-pattern`, and a `deps` table
+  holding `std` (`from source`), empty under `--no-std`;
+- `zane-lock.coda`, holding `zane-commit` and a `resolutions` table holding
+  `std`'s URL and commit, empty under `--no-std`;
+- for an application, `bin/<name>/main.zn`, a program package with a `main`
+  that prints `hello world`;
 - for a library, `lib/<name>/<name>.zn`, a library package with one public
   example function, and `test/<name>/main.zn`, a test package whose `main`
-  imports it and checks that function
+  imports it, checks that function and aborts when the check fails
   ([`packages.md` §2.1 and §7](https://github.com/zane-lang/spec/blob/main/spec/packages.md#21-a-projects-packages-live-in-lib-bin-and-test));
 - `.gitignore` listing `out/`, appended to if one exists.
 

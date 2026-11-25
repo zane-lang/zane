@@ -2,6 +2,8 @@ require "option_parser"
 require "../coda"
 require "../compiler_release"
 require "../errors"
+require "../git"
+require "../package_url"
 require "../progress"
 require "../home"
 require "../project"
@@ -23,21 +25,31 @@ module Zane::Commands
     # How the files `zane` writes are indented, as in the spec's examples.
     INDENT = "    "
 
-    USAGE = "usage: zane init [dir] [--name NAME] [--lib | --app] [--version-pattern PATTERN] [--zane-version TAG] [--no-git] [--yes]"
+    USAGE = "usage: zane init [dir] [--name NAME] [--lib | --app] [--version-pattern PATTERN] [--zane-version TAG] [--no-std] [--no-git] [--yes]"
+
+    # The project holding `core`, which the project depends on and its first
+    # package imports unless `--no-std` is given.
+    STD_URL = "https://github.com/zane-lang/std"
+
+    # The key the project depends on it by.
+    STD_KEY = "std"
 
     @dir : String = "."
     @name : String? = nil
     @start : Start? = nil
     @version_pattern : String? = nil
     @zane_version : String? = nil
+    @std = true
     @git = true
     @yes = false
 
     # *interactive* is true when questions may be asked, and false when
     # standard input is not a terminal. *compiler_url* is where releases are
-    # looked up and *toolchains* where they are installed; tests change both.
+    # looked up, *toolchains* where they are installed, and *std_url* where
+    # `std` is; tests change all three.
     def initialize(args : Array(String), @input : IO, @output : IO, @interactive : Bool,
-                   @compiler_url : String = CompilerRelease::URL, @toolchains : Path = Home.toolchains)
+                   @compiler_url : String = CompilerRelease::URL, @toolchains : Path = Home.toolchains,
+                   @std_url : String = STD_URL)
       parse(args)
     end
 
@@ -50,6 +62,7 @@ module Zane::Commands
         p.on("--app", "Start with a program package") { @start = Start::Program }
         p.on("--version-pattern PATTERN", "Which of the package's versions are interchangeable") { |v| @version_pattern = v }
         p.on("--zane-version TAG", "The compiler release to pin, instead of the newest installed or published") { |v| @zane_version = v }
+        p.on("--no-std", "Do not depend on std, and write code that uses only the intrinsics") { @std = false }
         p.on("--no-git", "Do not create a Git repository") { @git = false }
         p.on("-y", "--yes", "Accept every default") { @yes = true }
         p.unknown_args { |before, after| dirs.concat(before).concat(after) }
@@ -80,11 +93,12 @@ module Zane::Commands
       if git && !Process.find_executable("git")
         raise UserError.new("git is not installed; run again with --no-git")
       end
+      std = pin_std if @std
 
       # Checked again, since the directory may have changed while the
       # questions were answered.
       check_target(root)
-      write(root, name, start, pattern, release)
+      write(root, name, start, pattern, release, std)
       init_git(root) if git
 
       which = if @zane_version
@@ -96,6 +110,26 @@ module Zane::Commands
               end
       what = start.library? ? "the library package lib/#{name}/ and its test package test/#{name}/" : "the program bin/#{name}/"
       @output.puts "Created a project in #{root} with #{what}, built by the compiler #{release.tag}#{which}."
+      @output.puts "It depends on std #{std[0]}, compiled from source, for the core package." if std
+    end
+
+    # The newest version tag of `std` and the commit it points to, looked
+    # up before anything is written, so that a failure writes nothing.
+    private def pin_std : {String, String}
+      progress = Progress.current
+      progress.step("Finding the std release to pin")
+      tags = begin
+        Git.tags(@std_url)
+      rescue error : UserError
+        raise UserError.new("#{error.message}\nTo create a project that does not depend on std, run again with --no-std")
+      end
+      tag = Git.newest_version(tags) || raise UserError.new("#{@std_url} has no version tags; run again with --no-std")
+      if problem = PackageUrl.tag_error(tag)
+        raise UserError.new(problem)
+      end
+      commit = tags[tag]
+      progress.done("Pinning std #{tag} (commit #{commit[0, 12]})")
+      {tag, commit}
     end
 
     # The directory must hold nothing but what a new repository holds, so that
@@ -179,31 +213,38 @@ module Zane::Commands
       false
     end
 
-    private def write(root : Path, name : String, start : Start, pattern : String, release : CompilerRelease) : Nil
+    # *std* is the tag and commit of `std` the project depends on, or nil
+    # under `--no-std`.
+    private def write(root : Path, name : String, start : Start, pattern : String, release : CompilerRelease,
+                      std : {String, String}?) : Nil
       Dir.mkdir_p(root)
 
       Coda::Doc.new do |doc|
         manifest = doc.root
         manifest["zane-version"] = release.tag
         manifest["version-pattern"] = pattern
-        manifest["deps"] = Coda::KeyedTable.new(["version", "from"])
+        deps = Coda::KeyedTable.new(["version", "from"])
+        deps[STD_KEY] = Coda::Row.new.insert("version", std[0]).insert("from", "source") if std
+        manifest["deps"] = deps
         File.write(root / "zane.coda", doc.serialize(INDENT))
       end
 
       Coda::Doc.new do |doc|
         doc.root[Manifest::COMPILER_COMMIT] = release.commit
-        doc.root[Manifest::RESOLUTIONS] = Coda::KeyedTable.new(["url", "commit"])
+        resolutions = Coda::KeyedTable.new(["url", "commit"])
+        resolutions[STD_KEY] = Coda::Row.new.insert("url", @std_url).insert("commit", std[1]) if std
+        doc.root[Manifest::RESOLUTIONS] = resolutions
         File.write(root / "zane-lock.coda", doc.serialize(INDENT))
       end
 
       if start.program?
         Dir.mkdir_p(root / "bin" / name)
-        File.write(root / "bin" / name / "main.zn", application_source(name))
+        File.write(root / "bin" / name / "main.zn", std ? application_source(name) : intrinsic_application_source(name))
       else
         Dir.mkdir_p(root / "lib" / name)
-        File.write(root / "lib" / name / "#{name}.zn", library_source(name))
+        File.write(root / "lib" / name / "#{name}.zn", std ? library_source(name) : intrinsic_library_source(name))
         Dir.mkdir_p(root / Project::TEST_PACKAGE / name)
-        File.write(root / Project::TEST_PACKAGE / name / "main.zn", test_source(name))
+        File.write(root / Project::TEST_PACKAGE / name / "main.zn", std ? test_source(name) : intrinsic_test_source(name))
       end
 
       ignore = root / ".gitignore"
@@ -223,10 +264,12 @@ module Zane::Commands
       <<-ZANE
         package #{name};
 
-        @primitives$Unit main() {
-        \ttext @primitives$String("hello world");
-        \t@program$console!print(text);
-        \treturn @primitives$Unit();
+        import core$;
+
+        Unit main() {
+        \tconsole Console(@program$console);
+        \tconsole!print("hello world");
+        \treturn Unit();
         }
 
         ZANE
@@ -236,15 +279,61 @@ module Zane::Commands
       <<-ZANE
         package #{name};
 
+        import core$;
+
+        /// Every declaration is public unless its name starts with `_`.
+        Int double(n Int) => n + n;
+
+        ZANE
+    end
+
+    # The library package's test package, which imports it as any user does
+    # (spec packages.md §7); `zane test` builds and runs it, and fails when
+    # its `main` aborts.
+    private def test_source(name : String) : String
+      <<-ZANE
+        package test;
+
+        import core$;
+        import #{name};
+
+        Unit?@primitives$String main() {
+        \tif(#{name}$double(Int(21)) ~= 42) {
+        \t\tabort @primitives$String("double(21) is not 42");
+        \t}
+        \tconsole Console(@program$console);
+        \tconsole!print("ok");
+        \treturn Unit();
+        }
+
+        ZANE
+    end
+
+    # The `--no-std` sources, which use only the intrinsics.
+    private def intrinsic_application_source(name : String) : String
+      <<-ZANE
+        package #{name};
+
+        @primitives$Unit main() {
+        \ttext @primitives$String("hello world");
+        \t@program$console!print(text);
+        \treturn @primitives$Unit();
+        }
+
+        ZANE
+    end
+
+    private def intrinsic_library_source(name : String) : String
+      <<-ZANE
+        package #{name};
+
         /// Every declaration is public unless its name starts with `_`.
         @primitives$I64 double(n @primitives$I64) => @operators$add(n, n);
 
         ZANE
     end
 
-    # The library package's test package, which imports it as any user does
-    # (spec packages.md §7); `zane test` builds and runs it.
-    private def test_source(name : String) : String
+    private def intrinsic_test_source(name : String) : String
       <<-ZANE
         package test;
 

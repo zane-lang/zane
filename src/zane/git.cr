@@ -34,6 +34,13 @@ module Zane
       tags
     end
 
+    # The highest version tag of *tags*: a `v` and dot-separated numbers,
+    # compared as numbers. Nil when none is one.
+    def self.newest_version(tags : Hash(String, String)) : String?
+      versions = tags.keys.select(&.matches?(/\Av?\d+(\.\d+)*\z/))
+      versions.max_by? { |t| t.lchop('v').split('.').map(&.to_i64) }
+    end
+
     # The commit *tag* points to now in the repository at *url*.
     def self.resolve(url : String, tag : String) : String
       tags(url)[tag]? || raise UserError.new("#{url} has no tag #{tag}")
