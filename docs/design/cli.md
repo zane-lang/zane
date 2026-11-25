@@ -488,7 +488,8 @@ it writes only the package cache, as below.
 After the binary, whether or not it changed, `self update` puts the newest
 release of [`std`](https://github.com/zane-lang/std) in the package cache, as
 `zane self install-std` does: it lists `std`'s tags with `git ls-remote` and
-checks out the highest version tag into `~/.zane/packages`, where
+checks out the highest version tag into the package cache (`packages/` in
+`~/.zane`, or in `ZANE_HOME`), where
 `zane add --from-source` would, unless that checkout is there already. This is
 what `zane init` falls back to offline (§2.1). The installers run
 `zane self install-std` once the binary is in place. A failure there is only

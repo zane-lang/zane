@@ -41,6 +41,9 @@ git("tag", "v0.10", dir: STD_DIR)
 git("tag", "nightly", dir: STD_DIR)
 STD_V010 = git("rev-parse", "HEAD", dir: STD_DIR)
 
+# The package cache of the specs that pass none of their own, never the real one.
+PACKAGES = File.join(Dir.tempdir, "zane-spec-packages-#{Process.pid}")
+
 STD_ENV = %w(GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
 
 # Runs the block with git reaching STD_ROOT at `https://example.com/`.
@@ -66,7 +69,7 @@ private def with_tmp(&)
   end
 end
 
-private def init(args : Array(String), input = "", interactive = false, url = COMPILER, std = STD, packages = Zane::Home.packages) : String
+private def init(args : Array(String), input = "", interactive = false, url = COMPILER, std = STD, packages = Path[PACKAGES]) : String
   output = IO::Memory.new
   Zane::Commands::Init.new(args, IO::Memory.new(input), output, interactive, url, std_url: std, packages: packages).run
   output.to_s
@@ -445,4 +448,5 @@ end
 Spec.after_suite do
   FileUtils.rm_rf(COMPILER)
   FileUtils.rm_rf(STD_ROOT)
+  FileUtils.rm_rf(PACKAGES)
 end
