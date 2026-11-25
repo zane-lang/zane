@@ -65,6 +65,17 @@ try {
     }
     if (($env:Path -split ';') -notcontains $InstallDir) { $env:Path += ";$InstallDir" }
     Write-Host "Installed zane $Version at $destination"
+    # std goes into the package cache as `zane add` puts it there, so that
+    # `zane init` can use it when it cannot reach std.
+    $stdInstalled = $false
+    try {
+        & $destination self install-std
+        $stdInstalled = $LASTEXITCODE -eq 0
+    } catch {
+    }
+    if (-not $stdInstalled) {
+        Write-Warning 'std is not in the package cache; run `zane self install-std` once online'
+    }
     Write-Host 'The CLI also needs a compiler: put zanec on PATH or set ZANE_COMPILER.'
 } finally {
     if ($staged -and (Test-Path -LiteralPath $staged)) { Remove-Item -LiteralPath $staged -Force }

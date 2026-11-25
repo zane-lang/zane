@@ -2,8 +2,7 @@ require "option_parser"
 require "../coda"
 require "../compiler_release"
 require "../errors"
-require "../git"
-require "../package_url"
+require "../std"
 require "../progress"
 require "../home"
 require "../project"
@@ -27,13 +26,6 @@ module Zane::Commands
 
     USAGE = "usage: zane init [dir] [--name NAME] [--lib | --app] [--version-pattern PATTERN] [--zane-version TAG] [--no-std] [--no-git] [--yes]"
 
-    # The project holding `core`, which the project depends on and its first
-    # package imports unless `--no-std` is given.
-    STD_URL = "https://github.com/zane-lang/std"
-
-    # The key the project depends on it by.
-    STD_KEY = "std"
-
     @dir : String = "."
     @name : String? = nil
     @start : Start? = nil
@@ -45,11 +37,11 @@ module Zane::Commands
 
     # *interactive* is true when questions may be asked, and false when
     # standard input is not a terminal. *compiler_url* is where releases are
-    # looked up, *toolchains* where they are installed, and *std_url* where
-    # `std` is; tests change all three.
+    # looked up, *toolchains* where they are installed, *std_url* where `std`
+    # is, and *packages* the package cache; tests change all four.
     def initialize(args : Array(String), @input : IO, @output : IO, @interactive : Bool,
                    @compiler_url : String = CompilerRelease::URL, @toolchains : Path = Home.toolchains,
-                   @std_url : String = STD_URL)
+                   @std_url : String = Std::URL, @packages : Path = Home.packages)
       parse(args)
     end
 
@@ -93,7 +85,7 @@ module Zane::Commands
       if git && !Process.find_executable("git")
         raise UserError.new("git is not installed; run again with --no-git")
       end
-      std = pin_std if @std
+      std = Std.pin(@std_url, @packages) if @std
 
       # Checked again, since the directory may have changed while the
       # questions were answered.
@@ -110,26 +102,10 @@ module Zane::Commands
               end
       what = start.library? ? "the library package lib/#{name}/ and its test package test/#{name}/" : "the program bin/#{name}/"
       @output.puts "Created a project in #{root} with #{what}, built by the compiler #{release.tag}#{which}."
-      @output.puts "It depends on std #{std[0]}, compiled from source, for the core package." if std
-    end
-
-    # The newest version tag of `std` and the commit it points to, looked
-    # up before anything is written, so that a failure writes nothing.
-    private def pin_std : {String, String}
-      progress = Progress.current
-      progress.step("Finding the std release to pin")
-      tags = begin
-        Git.tags(@std_url)
-      rescue error : UserError
-        raise UserError.new("#{error.message}\nTo create a project that does not depend on std, run again with --no-std")
+      if std
+        where = std.cached ? ", the newest in the package cache, since std could not be reached" : ""
+        @output.puts "It depends on std #{std.tag}#{where}, compiled from source, for the core package."
       end
-      tag = Git.newest_version(tags) || raise UserError.new("#{@std_url} has no version tags; run again with --no-std")
-      if problem = PackageUrl.tag_error(tag)
-        raise UserError.new(problem)
-      end
-      commit = tags[tag]
-      progress.done("Pinning std #{tag} (commit #{commit[0, 12]})")
-      {tag, commit}
     end
 
     # The directory must hold nothing but what a new repository holds, so that
@@ -213,10 +189,10 @@ module Zane::Commands
       false
     end
 
-    # *std* is the tag and commit of `std` the project depends on, or nil
-    # under `--no-std`.
+    # *std* is the version of `std` the project depends on, or nil under
+    # `--no-std`.
     private def write(root : Path, name : String, start : Start, pattern : String, release : CompilerRelease,
-                      std : {String, String}?) : Nil
+                      std : Std::Pin?) : Nil
       Dir.mkdir_p(root)
 
       Coda::Doc.new do |doc|
@@ -224,7 +200,7 @@ module Zane::Commands
         manifest["zane-version"] = release.tag
         manifest["version-pattern"] = pattern
         deps = Coda::KeyedTable.new(["version", "from"])
-        deps[STD_KEY] = Coda::Row.new.insert("version", std[0]).insert("from", "source") if std
+        deps[Std::KEY] = Coda::Row.new.insert("version", std.tag).insert("from", "source") if std
         manifest["deps"] = deps
         File.write(root / "zane.coda", doc.serialize(INDENT))
       end
@@ -232,7 +208,7 @@ module Zane::Commands
       Coda::Doc.new do |doc|
         doc.root[Manifest::COMPILER_COMMIT] = release.commit
         resolutions = Coda::KeyedTable.new(["url", "commit"])
-        resolutions[STD_KEY] = Coda::Row.new.insert("url", @std_url).insert("commit", std[1]) if std
+        resolutions[Std::KEY] = Coda::Row.new.insert("url", @std_url).insert("commit", std.commit) if std
         doc.root[Manifest::RESOLUTIONS] = resolutions
         File.write(root / "zane-lock.coda", doc.serialize(INDENT))
       end

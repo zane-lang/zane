@@ -45,6 +45,7 @@ module Zane::CLI
       toolchain install [version]  install the latest compiler release, or the version named
       toolchain update [version]   install it, and build the project with it from now on
       self update [version]  replace this zane with the latest release, or the version named
+      self install-std       put the newest std in the package cache, for `zane init` offline
       help                   show this text
       version                show the version of zane
 
