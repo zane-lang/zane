@@ -113,13 +113,18 @@ module Zane::Commands
       end
     end
 
-    # Refuses a std the project could not build with: one with a package
-    # named *name*, which would clash with the project's first package
+    # Refuses a std the project could not build with: one without the `core`
+    # package the templates import, one with a package named *name*, which
+    # would clash with the project's first package
     # (spec dependencies.md §8), or one that needs another compiler than
     # *release*, which builds every package of the project (§2.1).
     private def check_std(name : String, release : CompilerRelease, std : Std::Pin) : Nil
       src = Std.source(@std_url, std.tag, @packages)
-      if Layout.new(src).public_libs.any? { |l| l.name == name }
+      names = Layout.new(src).public_libs.map(&.name)
+      unless names.includes?("core")
+        raise UserError.new("std #{std.tag} has no public `core` package, which the code `init` writes imports; run again with --no-std")
+      end
+      if names.includes?(name)
         raise UserError.new("std #{std.tag} has a package named `#{name}`, which the project's first package cannot share; " \
                             "choose another name with --name, or run again with --no-std")
       end

@@ -128,8 +128,10 @@ When `std` cannot be reached, `init` pins instead the highest version tag
 whose checkout is already in the package cache, which the installers and
 `zane self update` put there (§4.2), so `init` works offline. With neither,
 `init` fails, writes nothing, and suggests `zane self install-std` or
-`--no-std`. `init` also refuses, writing nothing, a `std` the project could
-not build with: one with a package of the first package's name, which the
+`--no-std`. `init` also refuses, writing no project files, a `std` the
+project could not build with, though the package cache may by then hold its
+checkout: one without a public `core` package, which the code it writes
+imports; one with a package of the first package's name, which the
 project could not import beside its own
 ([`dependencies.md` §8](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md)),
 and one whose `zane-version` needs a newer compiler than the one pinned, or

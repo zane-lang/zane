@@ -269,6 +269,21 @@ describe Zane::Commands::Init do
     end
   end
 
+  it "refuses a std without a core package, and writes nothing" do
+    with_tmp do |tmp|
+      std = copy_std("coreless-#{Random::Secure.hex(4)}")
+      dir = File.join(STD_ROOT, Path[std].basename)
+      git("mv", "lib/core", "lib/other", dir: dir)
+      git("mv", "lib/other/core.zn", "lib/other/other.zn", dir: dir)
+      git("commit", "-q", "-m", "no core", dir: dir)
+      git("tag", "v0.11", dir: dir)
+      expect_raises(Zane::UserError, "std v0.11 has no public `core` package") do
+        init([(tmp / "app").to_s, "--no-git"], std: std, packages: tmp / "packages")
+      end
+      File.exists?(tmp / "app").should be_false
+    end
+  end
+
   it "refuses a std that needs a newer compiler than the one pinned, and writes nothing" do
     with_tmp do |tmp|
       std = copy_std("newer-#{Random::Secure.hex(4)}")
