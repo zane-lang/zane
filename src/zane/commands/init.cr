@@ -199,17 +199,16 @@ module Zane::Commands
         manifest = doc.root
         manifest["zane-version"] = release.tag
         manifest["version-pattern"] = pattern
-        deps = Coda::KeyedTable.new(["version", "from"])
-        deps[Std::KEY] = Coda::Row.new.insert("version", std.tag).insert("from", "source") if std
-        manifest["deps"] = deps
+        # A table takes rows only once it is in the document.
+        manifest["deps"] = Coda::KeyedTable.new(["version", "from"])
+        manifest["deps"].as_keyed_table[Std::KEY] = Coda::Row.new.insert("version", std.tag).insert("from", "source") if std
         File.write(root / "zane.coda", doc.serialize(INDENT))
       end
 
       Coda::Doc.new do |doc|
         doc.root[Manifest::COMPILER_COMMIT] = release.commit
-        resolutions = Coda::KeyedTable.new(["url", "commit"])
-        resolutions[Std::KEY] = Coda::Row.new.insert("url", @std_url).insert("commit", std.commit) if std
-        doc.root[Manifest::RESOLUTIONS] = resolutions
+        doc.root[Manifest::RESOLUTIONS] = Coda::KeyedTable.new(["url", "commit"])
+        doc.root[Manifest::RESOLUTIONS].as_keyed_table[Std::KEY] = Coda::Row.new.insert("url", @std_url).insert("commit", std.commit) if std
         File.write(root / "zane-lock.coda", doc.serialize(INDENT))
       end
 

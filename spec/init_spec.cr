@@ -26,16 +26,35 @@ git("commit", "-q", "--allow-empty", "-m", "machine operations")
 git("tag", "v0.3")
 V03 = git("rev-parse", "HEAD")
 
-# A std repository with releases v0.9 and v0.10, which `init` pins the newest of.
-STD = File.join(Dir.tempdir, "zane-spec-std-#{Process.pid}")
-Dir.mkdir_p(STD)
-git("init", "-q", dir: STD)
-git("commit", "-q", "--allow-empty", "-m", "first", dir: STD)
-git("tag", "v0.9", dir: STD)
-git("commit", "-q", "--allow-empty", "-m", "second", dir: STD)
-git("tag", "v0.10", dir: STD)
-git("tag", "nightly", dir: STD)
-STD_V010 = git("rev-parse", "HEAD", dir: STD)
+# A std repository with releases v0.9 and v0.10, which `init` pins the newest
+# of. git reaches each repository in STD_ROOT at `https://example.com/<name>`
+# through `insteadOf`, since a package URL cannot be a Windows path.
+STD_ROOT = File.join(Dir.tempdir, "zane-spec-std-#{Process.pid}")
+STD_DIR = File.join(STD_ROOT, "std")
+STD = "https://example.com/std"
+Dir.mkdir_p(STD_DIR)
+git("init", "-q", dir: STD_DIR)
+git("commit", "-q", "--allow-empty", "-m", "first", dir: STD_DIR)
+git("tag", "v0.9", dir: STD_DIR)
+git("commit", "-q", "--allow-empty", "-m", "second", dir: STD_DIR)
+git("tag", "v0.10", dir: STD_DIR)
+git("tag", "nightly", dir: STD_DIR)
+STD_V010 = git("rev-parse", "HEAD", dir: STD_DIR)
+
+STD_ENV = %w(GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)
+
+# Runs the block with git reaching STD_ROOT at `https://example.com/`.
+private def with_std_registry(&)
+  saved = STD_ENV.to_h { |k| {k, ENV[k]?} }
+  ENV["GIT_CONFIG_COUNT"] = "1"
+  ENV["GIT_CONFIG_KEY_0"] = "url.#{Path[STD_ROOT].to_posix}/.insteadOf"
+  ENV["GIT_CONFIG_VALUE_0"] = "https://example.com/"
+  begin
+    yield
+  ensure
+    saved.each { |k, v| v ? (ENV[k] = v) : ENV.delete(k) }
+  end
+end
 
 private def with_tmp(&)
   dir = File.join(Dir.tempdir, "zane-spec-#{Random::Secure.hex(6)}")
@@ -47,17 +66,17 @@ private def with_tmp(&)
   end
 end
 
-private def init(args : Array(String), input = "", interactive = false, url = COMPILER, std = STD,
-                  packages = Zane::Home.packages) : String
+private def init(args : Array(String), input = "", interactive = false, url = COMPILER, std = STD, packages = Zane::Home.packages) : String
   output = IO::Memory.new
   Zane::Commands::Init.new(args, IO::Memory.new(input), output, interactive, url, std_url: std, packages: packages).run
   output.to_s
 end
 
-# A copy of the std repository at *dir*, to delete when a spec takes std offline.
-private def copy_std(dir : Path) : String
-  FileUtils.cp_r(STD, dir.to_s)
-  dir.to_s
+# A copy of the std repository named *name*, reached at its own URL, to
+# delete when a spec takes std offline.
+private def copy_std(name : String) : String
+  FileUtils.cp_r(STD_DIR, File.join(STD_ROOT, name))
+  "https://example.com/#{name}"
 end
 
 # Installs a toolchain as `zane toolchain install` leaves it, under ZANE_HOME.
@@ -150,6 +169,10 @@ describe Zane::Project do
 end
 
 describe Zane::Commands::Init do
+  around_each do |example|
+    with_std_registry { example.run }
+  end
+
   it "creates an application with the newest compiler and std pinned" do
     with_tmp do |tmp|
       output = init([(tmp / "my-app").to_s, "--no-git"])
@@ -204,9 +227,9 @@ describe Zane::Commands::Init do
   it "pins the newest std in the package cache when std cannot be reached" do
     with_tmp do |tmp|
       packages = tmp / "packages"
-      std = copy_std(tmp / "std")
+      std = copy_std("offline-#{Random::Secure.hex(4)}")
       Zane::Std.fetch(std, packages).should eq Zane::Std::Pin.new("v0.10", STD_V010, false)
-      FileUtils.rm_rf(std)
+      FileUtils.rm_rf(File.join(STD_ROOT, Path[std].basename))
 
       output = init([(tmp / "app").to_s, "--no-git"], std: std, packages: packages)
       output.should contain "It depends on std v0.10, the newest in the package cache, since std could not be reached"
@@ -221,7 +244,7 @@ describe Zane::Commands::Init do
       packages = tmp / "packages"
       dir = packages.join(Zane::PackageUrl.parse(STD).normalized.split('/'))
       {"v0.9", "v0.10"}.each do |tag|
-        git("clone", "-q", "--branch", tag, STD, (dir / tag / "src").to_s, dir: tmp.to_s)
+        git("clone", "-q", "--branch", tag, STD_DIR, (dir / tag / "src").to_s, dir: tmp.to_s)
       end
       Dir.mkdir_p(dir / "v0.11")
       Zane::Std.cached(STD, packages).should eq Zane::Std::Pin.new("v0.10", STD_V010, true)
@@ -232,7 +255,7 @@ describe Zane::Commands::Init do
   it "writes nothing when std cannot be reached and is not in the package cache" do
     with_tmp do |tmp|
       expect_raises(Zane::UserError, "Run `zane self install-std` once online, or run again with --no-std") do
-        init([(tmp / "app").to_s, "--no-git"], std: (tmp / "missing").to_s, packages: tmp / "packages")
+        init([(tmp / "app").to_s, "--no-git"], std: "https://example.com/missing", packages: tmp / "packages")
       end
       File.exists?(tmp / "app").should be_false
     end
@@ -393,6 +416,10 @@ describe Zane::Commands::Init do
 end
 
 describe Zane::Commands::SelfCommand do
+  around_each do |example|
+    with_std_registry { example.run }
+  end
+
   it "puts the newest std in the package cache with install-std" do
     with_tmp do |tmp|
       output = IO::Memory.new
@@ -410,4 +437,7 @@ describe Zane::Commands::SelfCommand do
   end
 end
 
-Spec.after_suite { FileUtils.rm_rf(COMPILER); FileUtils.rm_rf(STD) }
+Spec.after_suite do
+  FileUtils.rm_rf(COMPILER)
+  FileUtils.rm_rf(STD_ROOT)
+end
