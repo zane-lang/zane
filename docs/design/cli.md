@@ -122,10 +122,14 @@ Either way, `init` reports which compiler it pinned and where it found it.
 The project depends on [`std`](https://github.com/zane-lang/std), whose `core`
 package the code `init` writes imports. `init` lists the tags of
 `https://github.com/zane-lang/std` with `git ls-remote`, as `zane add` does
-(§3), and pins the highest version tag, compiled from source. `--no-std` skips
-this, so `init` works offline: the project then has no dependency, and its code
-uses only the intrinsics. When `std` cannot be reached, `init` fails, writes
-nothing, and suggests `--no-std`.
+(§3), pins the highest version tag, compiled from source, and checks it out
+into the package cache, as `zane add --from-source` and the next build would.
+When `std` cannot be reached, `init` pins instead the highest version tag
+whose checkout is already in the package cache, which the installers and
+`zane self update` put there (§4.2), so `init` works offline. With neither,
+`init` fails, writes nothing, and suggests `zane self install-std` or
+`--no-std`. `--no-std` skips `std`: the project then has no dependency, and
+its code uses only the intrinsics.
 
 `init` writes nothing until every question is answered, so cancelling leaves the
 directory untouched. It then writes:
@@ -426,7 +430,8 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
 | `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and `zane-commit` together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than `zane-commit` pins has moved, and is refused with a security error without the flag. |
-| `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named (§4.2). Works outside a project and changes none. |
+| `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named, then puts the newest `std` in the package cache (§4.2). Works outside a project and changes none. |
+| `zane self install-std` | Puts the newest `std` in the package cache, for `zane init` to use offline (§2.1, §4.2). The installers run it. Works outside a project and changes none. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T] [--build-argument A ...]` | One of the pinned compiler's debug views of a program, printed, for the project's only program or, when there are several, the program you name. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize`, `--target` and `--build-argument` (§2.3) show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
@@ -478,6 +483,15 @@ release tag, to its source tree, so the update refuses both and names what
 updates them instead. The update writes only in the directory that holds the
 binary, so it needs the access to it that installing did. Updating the CLI
 changes no project and installs no compiler (§1).
+
+After the binary, whether or not it changed, `self update` puts the newest
+release of [`std`](https://github.com/zane-lang/std) in the package cache, as
+`zane self install-std` does: it lists `std`'s tags with `git ls-remote` and
+checks out the highest version tag into `~/.zane/packages`, where
+`zane add --from-source` would, unless that checkout is there already. This is
+what `zane init` falls back to offline (§2.1). The installers run
+`zane self install-std` once the binary is in place. A failure there is only
+warned of, since the CLI is installed either way.
 
 ---
 
@@ -585,7 +599,8 @@ subpackage it tests
    `tree`, and the cache (§3, §3.1). Built.
 3. **Releases.** `release` and `release upload`, and cross-compilation.
 4. **Toolchains.** `toolchain install [tag]` and `toolchain update [tag]`,
-   and `self update [tag]` for the CLI itself (§4.2). Built.
+   and `self update [tag]` and `self install-std` for the CLI itself (§4.2).
+   Built.
 5. **Layout and tests.** The `lib/`, `bin/` and `test/` layout with
    subpackages, programs per directory of `bin/`, `test`, the `test-deps`
    block, `add --test`, `tree --test`, and the packages `init` writes (§2.5).

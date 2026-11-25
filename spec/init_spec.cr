@@ -47,10 +47,17 @@ private def with_tmp(&)
   end
 end
 
-private def init(args : Array(String), input = "", interactive = false, url = COMPILER, std = STD) : String
+private def init(args : Array(String), input = "", interactive = false, url = COMPILER, std = STD,
+                  packages = Zane::Home.packages) : String
   output = IO::Memory.new
-  Zane::Commands::Init.new(args, IO::Memory.new(input), output, interactive, url, std_url: std).run
+  Zane::Commands::Init.new(args, IO::Memory.new(input), output, interactive, url, std_url: std, packages: packages).run
   output.to_s
+end
+
+# A copy of the std repository at *dir*, to delete when a spec takes std offline.
+private def copy_std(dir : Path) : String
+  FileUtils.cp_r(STD, dir.to_s)
+  dir.to_s
 end
 
 # Installs a toolchain as `zane toolchain install` leaves it, under ZANE_HOME.
@@ -185,10 +192,47 @@ describe Zane::Commands::Init do
     end
   end
 
-  it "writes nothing when std cannot be reached, and suggests --no-std" do
+  it "checks out the std it pins into the package cache" do
     with_tmp do |tmp|
-      expect_raises(Zane::UserError, "run again with --no-std") do
-        init([(tmp / "app").to_s, "--no-git"], std: (tmp / "missing").to_s)
+      packages = tmp / "packages"
+      init([(tmp / "app").to_s, "--no-git"], packages: packages)
+      src = packages.join(Zane::PackageUrl.parse(STD).normalized.split('/')) / "v0.10" / "src"
+      Zane::Git.head(src).should eq STD_V010
+    end
+  end
+
+  it "pins the newest std in the package cache when std cannot be reached" do
+    with_tmp do |tmp|
+      packages = tmp / "packages"
+      std = copy_std(tmp / "std")
+      Zane::Std.fetch(std, packages).should eq Zane::Std::Pin.new("v0.10", STD_V010, false)
+      FileUtils.rm_rf(std)
+
+      output = init([(tmp / "app").to_s, "--no-git"], std: std, packages: packages)
+      output.should contain "It depends on std v0.10, the newest in the package cache, since std could not be reached"
+      read_coda(tmp / "app" / "zane.coda")["deps"].should eq({"columns" => ["version", "from"], "rows" => {"std" => {"version" => "v0.10", "from" => "source"}}})
+      read_coda(tmp / "app" / "zane-lock.coda")["resolutions"].should eq({"columns" => ["url", "commit"], "rows" => {"std" => {"url" => std, "commit" => STD_V010}}})
+      File.read(tmp / "app" / "bin" / "app" / "main.zn").should contain "import core$;"
+    end
+  end
+
+  it "takes the highest version in the package cache, as numbers" do
+    with_tmp do |tmp|
+      packages = tmp / "packages"
+      dir = packages.join(Zane::PackageUrl.parse(STD).normalized.split('/'))
+      {"v0.9", "v0.10"}.each do |tag|
+        git("clone", "-q", "--branch", tag, STD, (dir / tag / "src").to_s, dir: tmp.to_s)
+      end
+      Dir.mkdir_p(dir / "v0.11")
+      Zane::Std.cached(STD, packages).should eq Zane::Std::Pin.new("v0.10", STD_V010, true)
+      Zane::Std.cached("https://zane.invalid/std", packages).should be_nil
+    end
+  end
+
+  it "writes nothing when std cannot be reached and is not in the package cache" do
+    with_tmp do |tmp|
+      expect_raises(Zane::UserError, "Run `zane self install-std` once online, or run again with --no-std") do
+        init([(tmp / "app").to_s, "--no-git"], std: (tmp / "missing").to_s, packages: tmp / "packages")
       end
       File.exists?(tmp / "app").should be_false
     end
@@ -344,6 +388,24 @@ describe Zane::Commands::Init do
       output.should_not contain "Package name"
       output.should_not contain "Library or application"
       output.should_not contain "Version pattern"
+    end
+  end
+end
+
+describe Zane::Commands::SelfCommand do
+  it "puts the newest std in the package cache with install-std" do
+    with_tmp do |tmp|
+      output = IO::Memory.new
+      packages = tmp / "packages"
+      Zane::Commands::SelfCommand.new(["install-std"], output, IO::Memory.new, STD, packages).run.should eq 0
+      output.to_s.should contain "std v0.10 is in the package cache"
+      Zane::Std.cached(STD, packages).should eq Zane::Std::Pin.new("v0.10", STD_V010, true)
+    end
+  end
+
+  it "refuses arguments after install-std" do
+    expect_raises(Zane::UserError, "usage: zane self update") do
+      Zane::Commands::SelfCommand.new(["install-std", "v0.1"], IO::Memory.new, IO::Memory.new).run
     end
   end
 end
