@@ -5,6 +5,8 @@ require "../errors"
 require "../std"
 require "../progress"
 require "../home"
+require "../layout"
+require "../manifest"
 require "../project"
 
 module Zane::Commands
@@ -85,7 +87,10 @@ module Zane::Commands
       if git && !Process.find_executable("git")
         raise UserError.new("git is not installed; run again with --no-git")
       end
-      std = Std.pin(@std_url, @packages) if @std
+      if @std
+        std = Std.pin(@std_url, @packages)
+        check_std(name, release, std)
+      end
 
       # Checked again, since the directory may have changed while the
       # questions were answered.
@@ -105,6 +110,30 @@ module Zane::Commands
       if std
         where = std.cached ? ", the newest in the package cache, since std could not be reached" : ""
         @output.puts "It depends on std #{std.tag}#{where}, compiled from source, for the core package."
+      end
+    end
+
+    # Refuses a std the project could not build with: one with a package
+    # named *name*, which would clash with the project's first package
+    # (spec dependencies.md §8), or one that needs another compiler than
+    # *release*, which builds every package of the project (§2.1).
+    private def check_std(name : String, release : CompilerRelease, std : Std::Pin) : Nil
+      src = Std.source(@std_url, std.tag, @packages)
+      if Layout.new(src).public_libs.any? { |l| l.name == name }
+        raise UserError.new("std #{std.tag} has a package named `#{name}`, which the project's first package cannot share; " \
+                            "choose another name with --name, or run again with --no-std")
+      end
+      needed = Manifest.load(src).zane_version
+      major, minor = CompilerRelease.version(release.tag).not_nil!
+      version = needed.try { |n| CompilerRelease.version(n) }
+      if needed.nil? || version.nil?
+        raise UserError.new("std #{std.tag} names no compiler release as its `zane-version`; run again with --no-std")
+      elsif version[0] != major
+        raise UserError.new("std #{std.tag} is built by compiler major #{version[0]} (#{needed}), and this project by #{release.tag}; " \
+                            "choose a compiler of major #{version[0]} with --zane-version, or run again with --no-std")
+      elsif version[1] > minor
+        raise UserError.new("std #{std.tag} needs compiler #{needed} or later, and this project is pinned to #{release.tag}; " \
+                            "install it with `zane toolchain install #{needed}` and run again, or run again with --no-std")
       end
     end
 

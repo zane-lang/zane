@@ -32,9 +32,13 @@ V03 = git("rev-parse", "HEAD")
 STD_ROOT = File.join(Dir.tempdir, "zane-spec-std-#{Process.pid}")
 STD_DIR  = File.join(STD_ROOT, "std")
 STD      = "https://example.com/std"
-Dir.mkdir_p(STD_DIR)
+Dir.mkdir_p(File.join(STD_DIR, "lib", "core"))
+File.write(File.join(STD_DIR, "zane.coda"), "zane-version v0.0\nversion-pattern v*.+\n\ndeps [\n    key version from\n]\n")
+File.write(File.join(STD_DIR, "zane-lock.coda"), "zane-commit #{"0" * 40}\n\nresolutions [\n    key url commit\n]\n")
+File.write(File.join(STD_DIR, "lib", "core", "core.zn"), "package core;\n")
 git("init", "-q", dir: STD_DIR)
-git("commit", "-q", "--allow-empty", "-m", "first", dir: STD_DIR)
+git("add", "-A", dir: STD_DIR)
+git("commit", "-q", "-m", "first", dir: STD_DIR)
 git("tag", "v0.9", dir: STD_DIR)
 git("commit", "-q", "--allow-empty", "-m", "second", dir: STD_DIR)
 git("tag", "v0.10", dir: STD_DIR)
@@ -253,6 +257,29 @@ describe Zane::Commands::Init do
       Dir.mkdir_p(dir / "v0.12" / "src")
       Zane::Std.cached(STD, packages).should eq Zane::Std::Pin.new("v0.10", STD_V010, true)
       Zane::Std.cached("https://zane.invalid/std", packages).should be_nil
+    end
+  end
+
+  it "refuses a package name std has, and writes nothing" do
+    with_tmp do |tmp|
+      expect_raises(Zane::UserError, "std v0.10 has a package named `core`") do
+        init([(tmp / "core").to_s, "--no-git"], packages: tmp / "packages")
+      end
+      File.exists?(tmp / "core").should be_false
+    end
+  end
+
+  it "refuses a std that needs a newer compiler than the one pinned, and writes nothing" do
+    with_tmp do |tmp|
+      std = copy_std("newer-#{Random::Secure.hex(4)}")
+      dir = File.join(STD_ROOT, Path[std].basename)
+      File.write(File.join(dir, "zane.coda"), File.read(File.join(dir, "zane.coda")).sub("v0.0", "v0.9"))
+      git("commit", "-q", "-am", "needs v0.9", dir: dir)
+      git("tag", "v0.11", dir: dir)
+      expect_raises(Zane::UserError, "std v0.11 needs compiler v0.9 or later, and this project is pinned to v0.3") do
+        init([(tmp / "app").to_s, "--no-git"], std: std, packages: tmp / "packages")
+      end
+      File.exists?(tmp / "app").should be_false
     end
   end
 

@@ -77,6 +77,11 @@ module Zane
       {tag, commit}
     end
 
+    # Where the checkout of *tag* of *url* lies in the package cache.
+    def self.source(url : String, tag : String, packages : Path = Home.packages) : Path
+      CacheEntry.new(PackageUrl.parse(url), tag, packages).dir / "src"
+    end
+
     private def self.check_out(url : String, tag : String, commit : String, packages : Path) : Pin
       CacheEntry.new(PackageUrl.parse(url), tag, packages).source(commit)
       Pin.new(tag, commit, false)
