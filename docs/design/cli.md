@@ -430,8 +430,8 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
 | `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and `zane-commit` together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than `zane-commit` pins has moved, and is refused with a security error without the flag. |
-| `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named, then puts the newest `std` in the package cache (§4.2). Works outside a project and changes none. |
-| `zane self install-std` | Puts the newest `std` in the package cache, for `zane init` to use offline (§2.1, §4.2). The installers run it. Works outside a project and changes none. |
+| `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named, then puts the newest `std` in the package cache (§4.2). Works outside a project and changes none, though it writes the package cache. |
+| `zane self install-std` | Puts the newest `std` in the package cache, for `zane init` to use offline (§2.1, §4.2). The installers run it. Works outside a project and changes none, though it writes the package cache. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T] [--build-argument A ...]` | One of the pinned compiler's debug views of a program, printed, for the project's only program or, when there are several, the program you name. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize`, `--target` and `--build-argument` (§2.3) show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
@@ -480,9 +480,10 @@ next run of `zane` deletes it.
 A binary whose real path lies in the Nix store or a Homebrew `Cellar` belongs
 to that package manager, and a development build, whose version is not a
 release tag, to its source tree, so the update refuses both and names what
-updates them instead. The update writes only in the directory that holds the
-binary, so it needs the access to it that installing did. Updating the CLI
-changes no project and installs no compiler (§1).
+updates them instead. The update of the binary writes only in the directory
+that holds it, so it needs the access to it that installing did. Updating the
+CLI changes no project and installs no compiler (§1); besides that directory,
+it writes only the package cache, as below.
 
 After the binary, whether or not it changed, `self update` puts the newest
 release of [`std`](https://github.com/zane-lang/std) in the package cache, as
@@ -491,7 +492,9 @@ checks out the highest version tag into `~/.zane/packages`, where
 `zane add --from-source` would, unless that checkout is there already. This is
 what `zane init` falls back to offline (§2.1). The installers run
 `zane self install-std` once the binary is in place. A failure there is only
-warned of, since the CLI is installed either way.
+warned of, since the CLI is installed either way. An older `zane`, which does
+not do this, updates itself without it, so after updating from one, run
+`zane self install-std` once.
 
 ---
 

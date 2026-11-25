@@ -247,9 +247,14 @@ describe Zane::Commands::Init do
         git("clone", "-q", "--branch", tag, STD_DIR, (dir / tag / "src").to_s, dir: tmp.to_s)
       end
       Dir.mkdir_p(dir / "v0.11")
+      Dir.mkdir_p(dir / "v0.12" / "src")
       Zane::Std.cached(STD, packages).should eq Zane::Std::Pin.new("v0.10", STD_V010, true)
       Zane::Std.cached("https://zane.invalid/std", packages).should be_nil
     end
+  end
+
+  it "orders version tags as numbers, leaving out a number too large to compare" do
+    Zane::Git.versions(["v0.9", "nightly", "v1.99999999999999999999", "v0.10"]).should eq ["v0.10", "v0.9"]
   end
 
   it "writes nothing when std cannot be reached and is not in the package cache" do

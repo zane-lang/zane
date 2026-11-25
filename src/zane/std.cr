@@ -23,7 +23,46 @@ module Zane
     # Lists the tags of *url*, and puts the checkout of its newest version tag
     # in the package cache unless it is there already.
     def self.fetch(url : String = URL, packages : Path = Home.packages) : Pin
-      package = PackageUrl.parse(url)
+      tag, commit = newest(url)
+      check_out(url, tag, commit, packages)
+    end
+
+    # The newest version of *url* whose checkout is in the package cache, or
+    # nil when there is none. A checkout that cannot be read is passed over
+    # for the next newest.
+    def self.cached(url : String = URL, packages : Path = Home.packages) : Pin?
+      dir = packages.join(PackageUrl.parse(url).normalized.split('/'))
+      return nil unless Dir.exists?(dir)
+      checkouts = Dir.children(dir).select { |tag| Dir.exists?(dir / tag / "src") && !PackageUrl.tag_error(tag) }
+      Git.versions(checkouts).each do |tag|
+        begin
+          return Pin.new(tag, Git.head(dir / tag / "src"), true)
+        rescue UserError
+        end
+      end
+      nil
+    end
+
+    # The newest std: fetched when the tags of *url* can be listed, and
+    # otherwise the newest version already in the package cache. Only a
+    # failure to list the tags falls back: once they are listed, a checkout
+    # that fails, or a tag that has moved, is an error.
+    def self.pin(url : String = URL, packages : Path = Home.packages) : Pin
+      tag, commit = begin
+        newest(url)
+      rescue error : UserError
+        if found = cached(url, packages)
+          Progress.current.note("Cannot reach std; using std #{found.tag} from the package cache")
+          return found
+        end
+        raise UserError.new("#{error.message}\nNo std release is in the package cache either. " \
+                            "Run `zane self install-std` once online, or run again with --no-std")
+      end
+      check_out(url, tag, commit, packages)
+    end
+
+    # The newest version tag of *url* and the commit it points to.
+    private def self.newest(url : String) : {String, String}
       progress = Progress.current
       progress.step("Finding the newest std release")
       tag, commit = begin
@@ -35,33 +74,12 @@ module Zane
         raise error
       end
       progress.done("Found std #{tag} (commit #{commit[0, 12]})")
-      CacheEntry.new(package, tag, packages).source(commit)
+      {tag, commit}
+    end
+
+    private def self.check_out(url : String, tag : String, commit : String, packages : Path) : Pin
+      CacheEntry.new(PackageUrl.parse(url), tag, packages).source(commit)
       Pin.new(tag, commit, false)
-    end
-
-    # The newest version of *url* whose checkout is in the package cache, or
-    # nil when there is none.
-    def self.cached(url : String = URL, packages : Path = Home.packages) : Pin?
-      dir = packages.join(PackageUrl.parse(url).normalized.split('/'))
-      return nil unless Dir.exists?(dir)
-      checkouts = Dir.children(dir).select { |tag| Dir.exists?(dir / tag / "src") && !PackageUrl.tag_error(tag) }
-      tag = Git.newest_version(checkouts.to_h { |t| {t, ""} }) || return nil
-      Pin.new(tag, Git.head(dir / tag / "src"), true)
-    rescue UserError
-      nil
-    end
-
-    # The newest std: fetched when *url* can be reached, and otherwise the
-    # newest version already in the package cache.
-    def self.pin(url : String = URL, packages : Path = Home.packages) : Pin
-      fetch(url, packages)
-    rescue error : UserError
-      if found = cached(url, packages)
-        Progress.current.note("Cannot reach std; using std #{found.tag} from the package cache")
-        return found
-      end
-      raise UserError.new("#{error.message}\nNo std release is in the package cache either. " \
-                          "Run `zane self install-std` once online, or run again with --no-std")
     end
   end
 end

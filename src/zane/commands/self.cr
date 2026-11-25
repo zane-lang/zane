@@ -34,9 +34,14 @@ module Zane::Commands
     private def install_std : Nil
       pin = Progress.run(@error) { Std.fetch(@std_url, @packages) }
       @output.puts "std #{pin.tag} is in the package cache, for `zane init`."
-    rescue error : UserError
+    rescue error : UserError | File::Error | IO::Error
       @error.puts "zane: warning: cannot put the newest std in the package cache: #{error.message}"
-      @error.puts "`zane init` uses the newest std already there; `zane self install-std` tries again."
+      if found = Std.cached(@std_url, @packages)
+        @error.puts "`zane init` uses std #{found.tag}, already there, offline; `zane self install-std` tries again."
+      else
+        @error.puts "No std is in the package cache, so `zane init` needs to reach std, or --no-std; " \
+                    "`zane self install-std` tries again."
+      end
     end
 
     # Prints on *output* the result of the update.

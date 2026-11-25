@@ -74,7 +74,7 @@ try {
     } catch {
     }
     if (-not $stdInstalled) {
-        Write-Warning 'std is not in the package cache; run `zane self install-std` once online'
+        Write-Warning 'could not put the newest std in the package cache; run `zane self install-std` once online'
     }
     Write-Host 'The CLI also needs a compiler: put zanec on PATH or set ZANE_COMPILER.'
 } finally {

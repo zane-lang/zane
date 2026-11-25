@@ -122,7 +122,8 @@ prints `hello world`. To try the example above, replace `bin/hello/main.zn`
 with it (keeping `package hello;` as its first line).
 
 The installer and `zane self update` keep the newest `std` in zane's package
-cache, so `zane init` falls back to it when it cannot reach GitHub.
+cache, so `zane init` falls back to it when it cannot reach GitHub. After
+updating from a `zane` older than this, run `zane self install-std` once.
 `zane init --no-std` creates a project with no dependency, whose code uses
 only the compiler's intrinsics.
 
