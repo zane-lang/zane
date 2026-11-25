@@ -30,8 +30,8 @@ V03 = git("rev-parse", "HEAD")
 # of. git reaches each repository in STD_ROOT at `https://example.com/<name>`
 # through `insteadOf`, since a package URL cannot be a Windows path.
 STD_ROOT = File.join(Dir.tempdir, "zane-spec-std-#{Process.pid}")
-STD_DIR = File.join(STD_ROOT, "std")
-STD = "https://example.com/std"
+STD_DIR  = File.join(STD_ROOT, "std")
+STD      = "https://example.com/std"
 Dir.mkdir_p(STD_DIR)
 git("init", "-q", dir: STD_DIR)
 git("commit", "-q", "--allow-empty", "-m", "first", dir: STD_DIR)
