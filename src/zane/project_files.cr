@@ -13,8 +13,8 @@ module Zane
     # Edits the manifest in *root* with *manifest* and, when given, the lock
     # file with *lock*. Each file is written beside itself and renamed into
     # place, so neither is left half-written. The manifest is kept until the
-    # lock is in place, and put back if the lock cannot be, so the two files
-    # never disagree.
+    # lock is in place, and put back if the lock cannot be, so the lock file
+    # always matches the manifest's dependencies.
     def self.change(root : Path, manifest : Coda::Doc -> Nil, lock : (Coda::Doc -> Nil)? = nil) : Nil
       edited = edit(root / Manifest::FILE, manifest)
       locked = lock.try { |l| edit(root / Manifest::LOCK, l) }

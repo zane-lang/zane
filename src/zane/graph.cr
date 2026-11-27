@@ -63,7 +63,7 @@ module Zane
       end
 
       # The public library packages of *target*, by the name each is
-      # imported by along this edge, the dropped ones left out.
+      # imported by along this edge, the dropped packages left out.
       def publics(target : Package = package) : Array({String, Layout::Lib})
         target.layout.public_libs.compact_map { |l| name(l.name).try { |n| {n, l} } }
       end
@@ -95,8 +95,8 @@ module Zane
     # What each version depends on, as its manifest pins it; the project's
     # own dependencies are under "".
     @edges = {} of String => Array(Edge)
-    # The project's own dependencies, which choose where their code comes
-    # from (§2.1), by version.
+    # The project's own dependencies, whose `from` fields set where their
+    # code comes from (§2.1), by version.
     @top = {} of String => Dependency
     # Each version remapping displaced, and the version chosen in its place.
     @chosen = {} of String => Package
@@ -149,7 +149,7 @@ module Zane
       chosen(package) || package
     end
 
-    # Whether some version of the package at *url* is in the graph.
+    # True when the graph holds some version of the package at *url*.
     def package?(url : PackageUrl) : Bool
       @packages.any? { |p| p.url.normalized == url.normalized }
     end
@@ -345,7 +345,7 @@ module Zane
     # its dependencies' packages by, since the package that holds it
     # imports both, and in a test build apart from those of the project's
     # `test-deps` when a nested test package, which imports both, tests it
-    # (dependencies.md §8). Two subpackages may share a name.
+    # (dependencies.md §8). Two subpackages may share a package name.
     private def apart(libs : Array(Layout::Lib), of : String, edges : Array(Edge), whose : String) : Nil
       names = publics(edges).to_h
       libs.each do |l|
@@ -392,7 +392,7 @@ module Zane
     end
 
     # The keys of *package*'s library packages: those of its own project
-    # each may import, and the public ones of *edges*.
+    # each may import, and the public library packages of *edges*.
     private def project_imports(package : Package, edges : Array(Edge), remapped : Bool) : Array(String)
       package.layout.libs.flat_map do |l|
         own = package.layout.keys(l).map { |key, target| {key, package.id(target)} }

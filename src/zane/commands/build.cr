@@ -238,7 +238,7 @@ module Zane::Commands
     # that overlap never read each other's, for its dependencies compiled from
     # source to be compiled for it alone (compiler docs/design/lowering.md
     # §9, "Snapshots"). Nil when the compiler cannot write it, as for a
-    # program it refuses, which the build itself then reports; its
+    # program the compiler refuses, which the build itself then reports; its
     # dependencies are then compiled for any program. Nil too, and nothing
     # run, when *g* compiles no dependency for the program. The file is
     # removed once the block, which compiles them, is done.
@@ -318,7 +318,7 @@ module Zane::Commands
     # The project's `compile_commands.json` (§2.2): the compilation database
     # of its packages' C sources, which an editor's C language server reads,
     # merged from each build's, each source once. What a build cannot list,
-    # as a `c.coda` it refuses, is the check's to report, so it is not
+    # as a `c.coda` the build refuses, is the check's to report, so it is not
     # reported here too. `zane_ffi.h` is copied to `include/` of zane's
     # home, a place that does not move, for an editor set up by hand.
     private def compile_commands(builds : Array(Array(String))) : Nil
@@ -407,7 +407,7 @@ module Zane::Commands
   # `zane run [PROGRAM] [--build-argument A ...] [-- ARGS]` (§2.4): builds a program for the host
   # and runs it with *ARGS*, starting it as soon as the faster build is
   # made (`build_and_run`), and exits with its status. It builds into
-  # `out/run/`, so it never replaces what `zane build` made.
+  # `out/run/`, so it never replaces the programs `zane build` made.
   class Run < ProjectCommand
     @program_args = [] of String
     @program : String? = nil

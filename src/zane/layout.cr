@@ -84,7 +84,7 @@ module Zane
 
     # The library packages of the project that *lib* may import, each by the
     # key it imports it by, its name (packages.md §4.3): a top-level package
-    # imports the other top-level ones and its own subpackages, and a
+    # imports the other top-level packages and its own subpackages, and a
     # subpackage its own subpackages and every top-level package but the
     # top-level package it lies within.
     def keys(library : Lib) : Array({String, Lib})

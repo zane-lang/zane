@@ -69,7 +69,7 @@ module Zane::Commands
     end
 
     # The newest compiler release of *current*'s major. Moving to another
-    # major changes what the project's code must be, so it is done only by
+    # major can require changes to the project's code, so it is done only by
     # naming the release (spec dependencies.md §2.3, §14).
     private def newest_in_major(current : String) : String
       major = CompilerRelease.version(current).not_nil![0]

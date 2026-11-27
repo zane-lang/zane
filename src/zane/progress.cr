@@ -82,7 +82,7 @@ module Zane
       @color = ENV["NO_COLOR"]?.presence.nil?
     end
 
-    # Makes a display for *output* the current one while the block runs, and
+    # Makes a display for *output* the current display while the block runs, and
     # yields it. The step still running when the block returns is marked
     # done, and the step in which the block raised is marked failed. Inside a
     # display for the same *output*, it yields that display.
@@ -282,7 +282,7 @@ module Zane
         else
           amount = unit ? "#{done} #{unit}" : bytes(done)
         end
-        # Items come too unevenly for a rate to mean much.
+        # Items come too unevenly for a rate to be useful.
         speed = "#{bytes(rate.to_i64)}/s" if rate > 0 && !unit
       end
       # The bar narrows before anything is left out. Then the time left goes

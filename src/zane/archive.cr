@@ -196,8 +196,8 @@ module Zane
         refuse("an entry's header is corrupt") unless sum == expected
       end
 
-      # *name* as a path under *dir*, refused unless it is under the allowed root and
-      # cannot leave it. Nil for the archive's top directory itself.
+      # *name* as a path under *dir*. The method refuses a path that is outside
+      # the allowed root or can leave it. Nil for the archive's top directory itself.
       private def target(dir : Path, name : String) : Path?
         refuse("#{name} is an absolute path") if name.starts_with?('/')
         parts = name.split('/').reject { |p| p.empty? || p == "." }

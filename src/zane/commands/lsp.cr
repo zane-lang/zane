@@ -15,7 +15,7 @@ module Zane::Commands
     end
 
     # The compiler of the project the editor started the server in, or,
-    # outside any project, the newest one installed. A project whose
+    # outside any project, the newest installed compiler. A project whose
     # manifest is wrong is reported, as every other command reports it.
     def compiler : Compiler
       if root = project_root
