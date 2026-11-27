@@ -92,7 +92,7 @@ On **Windows x86_64**, in PowerShell:
 ```
 
 Both installers check the download's SHA-256 and need no administrator
-access. [`docs/releasing.md`](docs/releasing.md#what-the-installers-do)
+access. [`docs/releasing.md`](docs/releasing.md#how-the-installers-work)
 explains how to install into another directory or install another version. You can also
 take the binaries from [Releases](https://github.com/zane-lang/zane/releases)
 and read the scripts before running them.
@@ -125,8 +125,8 @@ with it (keeping `package hello;` as its first line).
 
 The installer and `zane self update` keep the newest `std` in zane's package
 cache, so `zane init` falls back to it when it cannot reach GitHub; with
-neither, `zane init` stops with an error that names the missing `std`. After updating from a `zane` older
-than this, run `zane self install-std` once.
+neither, `zane init` stops with an error that names the missing `std`. After
+updating from a `zane` older than this, run `zane self install-std` once.
 `zane init --no-std` creates a project with no dependency, whose code uses
 only the compiler's intrinsics.
 

@@ -30,7 +30,7 @@ If uploading fails, inspect and finish the draft, or remove the draft before
 retrying the failed job. Keep the draft's tag; never replace a published version's
 tag or assets.
 
-## The installers' steps
+## How the installers work
 
 `install.sh` (Linux and macOS) verifies the binary's SHA-256 and writes
 `~/.local/bin/zane`; `ZANE_INSTALL_DIR` chooses another directory, and a tag
