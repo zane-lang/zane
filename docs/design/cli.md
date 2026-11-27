@@ -26,7 +26,7 @@ belongs to the compiler instead.
 | Reading, validating and writing `zane.coda` and `zane-lock.coda` | Rewriting the `!` placeholder prefix of a library's exports |
 | Resolving tags, verifying commits and archive hashes | Linking a program with the runtime it carries |
 | The global package cache | Cross-compilation for `--target` |
-| Installing compilers and running the pinned one, and updating itself (§4.2) | Writing a library's objects for a release |
+| Installing compilers and running the pinned compiler, and updating itself (§4.2) | Writing a library's objects for a release |
 | Listing a project's builds for an editor, and starting the language server (§2.7, §2.8) | The language server: what an editor shows of a project's code |
 
 The interface between the two is a contract (§5). A change to it is the one
@@ -60,7 +60,7 @@ source, are named in one line as coming from the cache. Their source code
 still reaches an optimized `build`, which compiles the dependency code it
 calls to inline it (compiler
 [`separate-compilation.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/separate-compilation.md)
-C12), and that build's step says so.
+C12), and that build's step names the inlined dependency.
 
 What `zanec` writes while it checks or compiles the project's packages is
 held and written once the step is marked done or failed, so it never lands
@@ -112,7 +112,7 @@ offline, or to the compiler `--zane-version` names, when that compiler is
 installed. Its tag becomes `zane-version`, and the commit its toolchain record
 names becomes the lock file's `zane-commit`.
 
-With no compiler installed, or not the one named, `init` looks the release up
+With no compiler installed, or without the named compiler, `init` looks the release up
 online instead, by listing the tags of `zane-lang/compiler` with
 `git ls-remote`, so it needs no API access: the highest `vMAJOR.MINOR` tag, or
 the tag `--zane-version` names, becomes `zane-version`, and the commit that tag
@@ -134,7 +134,7 @@ checkout: one without a public `core` package, which the code it writes
 imports; one with a package of the first package's name, which the
 project could not import beside its own
 ([`dependencies.md` §8](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md)),
-and one whose `zane-version` needs a newer compiler than the one pinned, or
+and one whose `zane-version` needs a newer compiler than the pinned compiler, or
 another major. `--no-std` skips `std`: the project then has no dependency, and
 its code uses only the intrinsics.
 
@@ -193,7 +193,7 @@ program is built. The program is optimized. `T` is a target triple, spelled as `
 such as `x86_64-windows-gnu`
 ([compiler `platforms.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/platforms.md)),
 and defaults to the host, which `zane` names the same way: `x86_64-linux-gnu`,
-`aarch64-macos`, and so on. That name is the row it looks up in a
+`aarch64-macos` or `x86_64-windows-gnu`. That name is the row it looks up in a
 dependency's `zane-artifacts.coda`. A dependency with no artifact for `T`
 stops the build with an error that names it and suggests `from source`. A
 project with no program package is refused: its library packages are checked
@@ -231,7 +231,7 @@ the program to run. `run` uses the build that gives the program's result
 soonest, counting the build and the run together: the compiler's tiered build
 ([compiler `tiers.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/tiers.md)).
 `zane` starts the optimized build, tier 1, in the background, builds the
-unoptimized one, tier 0, and runs it as soon as it is linked, with
+unoptimized build, tier 0, and runs it as soon as it is linked, with
 `ZANE_TIER_UP` naming tier 1's library beside it, `<name>.tier1.so`
 (`.dylib` on macOS, `.dll` on Windows). Tier 0 moves each of its functions to
 tier 1 once that library is there, so a short program never waits for the
@@ -256,7 +256,7 @@ Run on one test package, `test` exits with its status. Run on all, it names
 each as it starts, then says how many passed or which failed, and exits with
 1 when any did. A project with no test package is refused.
 
-Each test package decides what its tests do and how they report: `zane` runs
+Each test package defines its own tests and their reporting: `zane` runs
 one program for each test package and passes on that program's exit status, so a
 testing library in `test-deps` decides how failures are counted and shown.
 
@@ -309,12 +309,12 @@ These and `zane toolchain update` (§4) are the only commands that write
 |---|---|
 | `zane add <url> [tag] [--as key] [--from-source] [--test] [--rename package=name …]` | Resolves the tag, newest when omitted, and pins its commit. The newest is the highest tag of a `v` and dot-separated numbers. The key defaults to the last part of the URL path. Resolves the graph with the library in it before writing either file, so a library that cannot be resolved is never recorded. Refuses a project with no public library package. Refuses, too, a graph in which a package linked as a release has no `zane-artifacts.coda`, since no build could link it: the library itself, unless `--from-source` is given, or one of its own dependencies, which are always linked as releases. A release whose artifact manifest lists no archive for the host is recorded with a warning, since the project may build for the targets it lists. Prints the `import` lines for its public library packages. With `--test`, writes the row into `test-deps` instead of `deps`. With `--from-source`, for a library the project already depends on at that URL, in the block `--test` names, sets its `from` to `source` at the version it pins; `zane dev off` sets it back to `release`. A dependency compiled from a local project is left as it is. Each `--rename` writes a `renames` row for the new dependency, held to the rules `zane rename` checks, so a library whose package's name clashes with one the project already imports can be added under another name, or with that package dropped. |
 | `zane remove <key>` | Removes the key, from `deps` or `test-deps`, from both files, with its `renames` rows, and warns about each line of the project's packages that still imports one of its packages. |
-| `zane update [key [tag]] [--accept-tag-move]` | Moves one key, or every key, to the tag named, or else the newest, and pins its commit. A tag that now points to another commit than the lock file pins has moved, and is refused with a security error without the flag. Refuses, as `add` does, a release it would move to a tag that publishes no prebuilt objects. |
+| `zane update [key [tag]] [--accept-tag-move]` | Moves one key, or every key, to the tag named, or else the newest, and pins its commit. Without the flag, `zane update` refuses a tag whose commit differs from the commit in the lock file: the tag has moved, which is a security error. Refuses, as `add` does, a release it would move to a tag that publishes no prebuilt objects. |
 | `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. `dev off` refuses, as `add` does, a release that publishes no prebuilt objects. |
 | `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
 | `zane rename <key> <package> <name>` / `zane rename off <key> <package>` | Writes the `renames` row that has the project import the key's package by the name, replacing the package's row if it has one, or drops the package when the name is `_`; `rename off` removes the row ([`dependencies.md` §2.1, §2.3, §8](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#8-importing-a-dependencys-packages)). The name is a package name that is neither `test` nor the package's own; the package must be a public library package of the version the key pins, and the rows must not drop every one. The changed graph is resolved before the file is written, so a name that would clash with another package the project imports is refused, and so is a `rename off` that would bring one back. `off` is the first argument only while the project has no dependency of that key; `zane rename <key> <package> <package>`, naming the package's own name, removes the row too, whatever the keys are. |
 | `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. It links no program, so it compiles a `source` dependency for any program; a build compiles it again for the program it links into, which needs nothing online (§3). |
-| `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, public library packages, URL and where its code comes from; a package its dependent's `renames` rows rename is shown as `math as twoMath`, and one they drop as `extra dropped`. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the one chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
+| `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, public library packages, URL and where its code comes from; a package its dependent's `renames` rows rename is shown as `math as twoMath`, and one they drop as `extra dropped`. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the version chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
 
 `update`, `dev` and `rename` apply to a `test-deps` key as to a `deps` key. `add`, `update`,
 `dev` and `rename` resolve the changed graph, `test-deps` included, before writing either
@@ -358,7 +358,7 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
 - **Archives.** For a `release` dependency, `zane` reads the target's row of
   the checkout's `zane-artifacts.coda`, downloads its URL with
   `curl --proto =https --proto-redir =https`, and refuses the file unless its
-  SHA-256 is the committed one
+  SHA-256 matches the committed hash
   ([§5](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#5-fetching)).
   It then unpacks the archive into `artifacts/<target>/build/`, refusing it
   whole if any entry is not a directory or regular file under `build/`.
@@ -392,7 +392,7 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   whole hash too, so it is reused only for programs that write back into the
   same places: programs that write back into none all write one file, and
   share one object. When the compiler cannot write the
-  file, as for a program it refuses, and while remapping moves what the
+  file, as for a program the compiler refuses, and while remapping moves what the
   objects name, which those places do not follow, a dependency is compiled
   for any program, into `build-from-source/<target>/`. A path dependency is compiled the same way on every build, but
   unoptimized, so a build stays quick while it changes, into the
@@ -406,7 +406,7 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   ([§15.3](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#153-selection-best-of-both)).
   A tag of another shape is kept apart quietly, and versions whose patterns
   differ are kept apart with a note (§15.4). A displaced version is neither
-  compiled against nor linked: every key that named it names the chosen one,
+  compiled against nor linked: every key that named it names the chosen version,
   and `zanec --remap` (§5) moves each linked object's references to it,
   into the project's `out/remapped/<target>/`, since which versions are
   displaced is the project's choice.
@@ -436,13 +436,13 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 | `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has the compiler its `zane-version` names write their `!`-prefixed objects for each target, with the files it writes beside them (§5), packs one archive per target of all of them, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
-| `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and `zane-commit` together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. A tag that now points to another commit than `zane-commit` pins has moved, and is refused with a security error without the flag. |
+| `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and `zane-commit` together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. Without the flag, `zane toolchain update` refuses a tag whose commit differs from `zane-commit`: the tag has moved, which is a security error. |
 | `zane self update [tag]` | Replaces the running `zane` with the latest published CLI release, or the tag named, then puts the newest `std` in the package cache (§4.2). Works outside a project and changes none, though it writes the package cache. |
 | `zane self install-std` | Puts the newest `std` in the package cache, for `zane init` to use offline (§2.1, §4.2). The installers run it. Works outside a project and changes none, though it writes the package cache. |
 | `zane cache list` / `path` / `clean [--stale]` | Lists each version in `~/.zane/packages` with the targets its objects are ready for and its size, prints the directory, or empties it. With `--stale`, removes only what no build uses: the parts an interrupted fetch left beside where they go, and rewritten objects without their record. |
 | `zane inspect cst\|sst\|decls\|tst\|cgt\|ll [PROGRAM] [--optimize] [--target T] [--build-argument A ...]` | One of the pinned compiler's debug views of a program, printed, for the project's only program or, when there are several, the program you name. `decls`, `tst`, `cgt` and `ll` view the program's build, given the packages `build` gives it (§5), and `--optimize`, `--target` and `--build-argument` (§2.3) show it as `zane build` makes it, which is how a reader sees what an optimized build computed while it compiled. `cst` and `sst` view each source file of the program package, in name order. |
 
-What a release produces for a project's programs is not designed yet.
+The design of a release's output for a project's programs is still open.
 
 ### 4.1 Installed toolchains
 
@@ -464,7 +464,7 @@ directory. An already installed matching release is reused; existing incomplete
 or conflicting directories are preserved and reported. Installing does not
 change any project's compiler pin. A directory without a record is an interrupted install
 and is ignored, as is a toolchain from another `url`. A toolchain is found from
-its record alone; the compiler is never asked what it is.
+its record alone; `zane` never queries the compiler for its version.
 
 ### 4.2 Updating `zane` itself
 
@@ -476,7 +476,7 @@ tag it takes the latest release, and only when that is newer than the running
 binary; a tag names any release, older ones included. Versions compare as
 numbers, so `v0.2` and `v0.2.0` are the same release. A release names its
 binaries `zane-linux-x86_64`, `zane-macos-arm64` and `zane-windows-x86_64.exe`,
-and the update downloads the one for its host into a directory beside the
+and the update downloads the binary for its host into a directory beside the
 binary, checks it against the release's `SHA256SUMS`, runs it with
 `--version` to check that it starts and is that release, and then renames it
 over the old binary, so an interrupted update leaves one or the other whole.
@@ -556,7 +556,7 @@ which only `zane` reads off the directories, so the contract is:
   ([compiler `ffi.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/ffi.md) F13).
   A tiered build inlines none, so `run` and `test` pass no `--c-hashes`.
 - **`--object OUT`** writes the object of every library package of the
-  project being compiled, the packages that share the first one's stamp,
+  project being compiled, the packages that share the first package's stamp,
   every symbol they define under the `!` placeholder, or under their stamp
   when they have one. Beside `OUT` it writes `STEM.c.N.o`, an object for
   each C source holding assembly, and `STEM.c.hashes`, the hashes of the
@@ -577,7 +577,7 @@ which only `zane` reads off the directories, so the contract is:
   output, running `ZANE builds` in each project it serves (§2.8).
 - **`--rewrite STAMP INPUT OUTPUT`** writes the object `INPUT` with every `!`
   in its symbols replaced by `STAMP`, for ELF, Mach-O and COFF objects, and
-  a file of C module hashes with every `!` of its packages replaced so. It is
+  a file of C module hashes with every `!` of its packages replaced by `STAMP` too. It is
   the compiler's step because the symbol spelling is the compiler's, so the
   pinned compiler rewrites what that same version built.
 - **`--remap FROM TO INPUT OUTPUT`** writes the object `INPUT` with every
