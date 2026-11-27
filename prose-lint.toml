@@ -1,0 +1,6 @@
+# prose-lint has no Crystal, PowerShell or Nix lexer; all three write
+# comments with a leading #, which the hash lexer reads.
+[languages]
+".cr" = "hash"
+".ps1" = "hash"
+".nix" = "hash"
