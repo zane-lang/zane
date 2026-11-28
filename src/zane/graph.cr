@@ -441,11 +441,11 @@ module Zane
 
     # The compiler's flags for *target*'s objects: `--link` for each, and,
     # when *hashes*, `--c-hashes` for each file of C module hashes beside
-    # them, which only an optimized build reads (F13). *write_backs* is the
-    # file of the places the program they link into writes back into, as
-    # `objects` takes it.
-    def link_flags(target : String, compiler : Compiler, hashes : Bool, write_backs : Path? = nil) : Array(String)
-      objects(target, compiler, write_backs).flat_map do |o|
+    # them, which only an optimized build reads (F13). *write_backs* and
+    # *arguments* are what `objects` takes.
+    def link_flags(target : String, compiler : Compiler, hashes : Bool, write_backs : Path? = nil,
+                   arguments : Array(String) = [] of String) : Array(String)
+      objects(target, compiler, write_backs, arguments).flat_map do |o|
         if Graph.hashes?(o)
           hashes ? ["--c-hashes", o.to_s] : [] of String
         else
@@ -470,9 +470,19 @@ module Zane
     # or while remapping moves what an object names, which those places do
     # not follow, it is compiled for any program.
     #
+    # Each dependency is compiled with the build's *arguments*, the values
+    # of `--build-argument`, since an exported lambda has the rights of
+    # root-package code wherever it is declared (spec packages.md §6.1,
+    # §8.4), and its `comptime` calls may read them. A cached object whose
+    # calls read them is reused only for the same arguments, and a release
+    # whose prebuilt objects read them, which are the publisher's, is
+    # compiled from source instead. The compiler's marker of such a read is
+    # not among the objects returned.
+    #
     # The progress display shows each step that does work, and the versions
     # whose objects the cache already held, prebuilt or compiled, in one line.
-    def objects(target : String, compiler : Compiler, write_backs : Path? = nil) : Array(Path)
+    def objects(target : String, compiler : Compiler, write_backs : Path? = nil,
+                arguments : Array(String) = [] of String) : Array(Path)
       progress = Progress.current
       cached = [] of Package
       write_backs = nil unless @chosen.empty?
@@ -481,11 +491,16 @@ module Zane
         entry = p.entry
         case p.from
         in .release?
-          files, hit = entry.not_nil!.objects(p.commit, target, compiler, @workspace.toolchain)
+          if found = entry.not_nil!.objects(p.commit, target, compiler, @workspace.toolchain)
+            files, hit = found
+          else
+            progress.note("#{p.key} #{p.tag}'s prebuilt objects for #{target} read the arguments of the build that made them; compiling it from source")
+            files, hit = from_source(p, target, compiler, places, write_backs, arguments)
+          end
           cached << p if hit
           files
         in .source?
-          files, hit = entry.not_nil!.compiled(p.commit, target, @workspace.toolchain, places) { |dest| compile(p, target, compiler, dest, write_backs, optimize: true) }
+          files, hit = from_source(p, target, compiler, places, write_backs, arguments)
           cached << p if hit
           files
         in .path?
@@ -494,7 +509,7 @@ module Zane
           FileUtils.rm_rf(dest.parent)
           Dir.mkdir_p(dest.parent)
           progress.step("Compiling #{p.key} from #{p.layout.root} for #{target}")
-          compile(p, target, compiler, dest, write_backs)
+          compile(p, target, compiler, dest, write_backs, arguments)
           progress.done("Compiled #{p.key} from #{p.layout.root} for #{target}")
           Dir.children(dest.parent).sort.map { |n| dest.parent / n }.select { |f| File.file?(f) }
         end
@@ -503,7 +518,17 @@ module Zane
       if !cached.empty? && @noted.add?(target)
         progress.note(Graph.from_cache(cached.map { |p| {p.key, p.tag} }, target))
       end
+      objects.reject! { |f| CacheEntry.arguments?(f) }
       @chosen.empty? ? objects : remapped(objects, target, compiler)
+    end
+
+    # *package*'s object compiled from its checkout, optimized, and whether
+    # the cache already held it.
+    private def from_source(package : Package, target : String, compiler : Compiler, places : String?,
+                            write_backs : Path?, arguments : Array(String)) : {Array(Path), Bool}
+      package.entry.not_nil!.compiled(package.commit, target, @workspace.toolchain, places, arguments) do |dest|
+        compile(package, target, compiler, dest, write_backs, arguments, optimize: true)
+      end
     end
 
     # The line that names the versions whose objects for *target* came from
@@ -518,15 +543,18 @@ module Zane
     # Compiles *package*'s library packages on their own into the object
     # *dest*, named with its stamp, against the versions its own manifest
     # pins (compiler docs/design/separate-compilation.md C1, C6), for the
-    # program that writes back into the places of *write_backs*, when given.
+    # program that writes back into the places of *write_backs*, when given,
+    # and started with the build's *arguments*.
     # With *optimize*, as for a `source` dependency, whose object the cache
     # keeps, the object is optimized: the code a program runs wherever it
     # calls the dependency without inlining it. A path dependency, compiled
     # again on every build, is not, so a build stays quick while it changes.
-    private def compile(package : Package, target : String, compiler : Compiler, dest : Path, write_backs : Path?, optimize : Bool = false) : Nil
+    private def compile(package : Package, target : String, compiler : Compiler, dest : Path, write_backs : Path?,
+                        arguments : Array(String), optimize : Bool = false) : Nil
       closure = [] of Package
       gather(package, closure)
       args = compiler.root_flags(false) + ["--object", dest.to_s]
+      arguments.each { |a| args.push("--build-argument", a) }
       args << "--optimize" if optimize
       args.push("--program-write-backs", write_backs.to_s) if write_backs
       args.push("--target", target) unless target == Target::HOST

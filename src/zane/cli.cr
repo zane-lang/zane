@@ -39,7 +39,8 @@ module Zane::CLI
       unremap <url>          link its versions side by side again
       rename <key> <pkg> <name>  import key's package pkg by name, or drop it when name is _
       rename off <key> <pkg> import it by its own name again, as rename <key> <pkg> <pkg> does
-      fetch                  fetch what a build needs, so it can then run offline
+      fetch                  fetch what a build needs, so it can then run offline;
+                             takes --target TRIPLE and --build-argument, as zane build does
       tree [--test]          show the packages the project, or its test build, depends on
       cache list|path|clean  show, locate or empty the package cache
       toolchain install [version]  install the latest compiler release, or the version named

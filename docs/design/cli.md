@@ -213,13 +213,20 @@ range the target system permits. A dependency's manifest cannot set either
 the build is started with, in order: inside a call marked `comptime`, the
 runtime's `arguments` gives them
 ([`effects.md` §5.6](https://github.com/zane-lang/spec/blob/main/spec/effects.md#56-explicit-compile-time-evaluation)).
-`build`, `run`, `test` and `inspect` take it, and pass it to every compiler
-run of the program's or test package's own build, both tiers of `run` and
-`test` included, so the two tiers compute the same values. Only the root
-package reaches the runtime
+`build`, `run`, `test`, `inspect` and `fetch` take it, and pass it to every
+compiler run of the program's or test package's own build, both tiers of
+`run` and `test` included, so the two tiers compute the same values. Each
+dependency compiled from source or a path is compiled with them too.
+Only the root package reaches the runtime
 ([`packages.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#61-program-plugin-and-test-packages-are-roots)),
-so a dependency's marked calls never read the build's arguments, its object
-is compiled without them, and the cache keeps it whatever they are. With
+but an exported lambda has the rights of root-package code wherever it is
+declared
+([§8.4](https://github.com/zane-lang/spec/blob/main/spec/packages.md#84-exports-have-entry-point-rights)),
+so a library's exported lambda can read them. The compiler marks an object
+whose marked calls read them (§5), and the cache reuses such an object only
+for the same arguments; an object without the mark is reused whatever they
+are (§3.1). A release whose prebuilt objects carry the mark was compiled with
+its publisher's arguments, so `zane` compiles it from source instead. With
 none given, nothing is passed, so a compiler released before `comptime`
 still builds the project.
 
@@ -313,7 +320,7 @@ These and `zane toolchain update` (§4) are the only commands that write
 | `zane dev <key> <path>` / `zane dev off <key>` | Sets the key's `from` to a local project, or back to `release`. The path is given from where the command runs and written from the project's root. `dev off` refuses, as `add` does, a release that publishes no prebuilt objects. |
 | `zane remap <url>` / `zane unremap <url>` | Adds the URL to the `remaps` list, or takes it out. Warns when no package of the graph has the URL. |
 | `zane rename <key> <package> <name>` / `zane rename off <key> <package>` | Writes the `renames` row that has the project import the key's package by the name, replacing the package's row if it has one, or drops the package when the name is `_`; `rename off` removes the row ([`dependencies.md` §2.1, §2.3, §8](https://github.com/zane-lang/spec/blob/main/spec/dependencies.md#8-importing-a-dependencys-packages)). The name is a package name that is neither `test` nor the package's own; the package must be a public library package of the version the key pins, and the rows must not drop every one. The changed graph is resolved before the file is written, so a name that would clash with another package the project imports is refused, and so is a `rename off` that would bring one back. `off` is the first argument only while the project has no dependency of that key; `zane rename <key> <package> <package>`, naming the package's own name, removes the row too, whatever the keys are. |
-| `zane fetch [--target T …]` | Runs the build flow up to linking, for each target. For CI and offline work. It links no program, so it compiles a `source` dependency for any program; a build compiles it again for the program it links into, which needs nothing online (§3). |
+| `zane fetch [--target T …] [--build-argument A …]` | Runs the build flow up to linking, for each target. For CI and offline work. It links no program, so it compiles a `source` dependency for any program; a build compiles it again for the program it links into, which needs nothing online (§3). It compiles a dependency whose marked calls read the build's arguments with those given here, which a build reuses only when it is given the same `--build-argument` values (§2.3). |
 | `zane tree [--test]` | With `--test`, prints the test build's graph, the `test-deps` rows marked. Prints the resolved graph: each package under what depends on it, with its key, tag, public library packages, URL and where its code comes from; a package its dependent's `renames` rows rename is shown as `math as twoMath`, and one they drop as `extra dropped`. A version reached again is printed once more, marked, without what it depends on, and a version remapping displaced is marked with the version chosen in its place, whose dependencies follow beneath it. Then it lists the versions of each package linked side by side, and those remapping collapsed. |
 
 `update`, `dev` and `rename` apply to a `test-deps` key as to a `deps` key. `add`, `update`,
@@ -369,7 +376,10 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   compiler pin (`zane-version` and `zane-commit`) the objects
   were made with. The objects are reused only while all five match;
   otherwise they are rewritten again, from the kept archive when its hash
-  still matches.
+  still matches. An archive that holds the compiler's mark of a read of the
+  build's arguments (§5) is not rewritten: its objects hold its publisher's
+  arguments, so `build/<target>.coda` records that the archive read them,
+  and the dependency is compiled from source as a `source` dependency is.
 - **Compiling from source.** A `source` dependency is compiled on its own,
   optimized, from its checkout, into `build-from-source/<target>/package.o`, with the
   files the compiler writes beside it (§5), named with its stamp, against the versions its own lock file pins
@@ -377,7 +387,11 @@ packages `check` checks, and never for `build` or `run`; a dependency's own
   `build-from-source/<target>.coda` records the commit, target and compiler
   pin it was compiled with, and that it was optimized, and the object is
   reused only while all five match, and, for one compiled for a program,
-  the hash below. The object is the code a program runs wherever it calls
+  the hash below. When the compiler marked the object as reading the
+  build's arguments (§5), the record also keeps the hash of those
+  arguments, and the object is reused only for a build given the same
+  `--build-argument` values; a build given other values compiles it again
+  in its place. The object is the code a program runs wherever it calls
   the dependency without inlining it, so it is optimized, once, and reused.
   Before a program or test is linked, `zanec --write-backs` writes
   the file of the places its spawned calls write back into, into a file of
@@ -433,7 +447,7 @@ once whole, so an interrupted fetch leaves nothing that looks ready.
 
 | Command | Does |
 |---|---|
-| `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has the compiler its `zane-version` names write their `!`-prefixed objects for each target, with the files it writes beside them (§5), packs one archive per target of all of them, writes `zane-artifacts.coda`, commits and tags. Archives are left in `out/release/<tag>/`. |
+| `zane release <tag> [--targets T…]` | Refuses a dirty tree, a tag that does not fit `version-pattern`, and any path `from` in `deps`. For a project with library packages, has the compiler its `zane-version` names write their `!`-prefixed objects for each target, with the files it writes beside them (§5), packs one archive per target of all of them, writes `zane-artifacts.coda`, commits and tags. An object whose marked calls read the build's arguments is packed with the compiler's mark (§5), so a project that depends on the release compiles it from source with its own arguments (§3.1). Archives are left in `out/release/<tag>/`. |
 | `zane release upload <tag>` | Uploads those exact archives to the GitHub Release, then downloads each one and checks its hash. The only GitHub-specific step; fetching needs only HTTPS. |
 | `zane toolchain install [tag]` | Installs the latest published compiler release, or the tag named, into the shared toolchain directory (§4.1). Works outside a project. |
 | `zane toolchain update [tag] [--accept-tag-move]` | Installs the tag named, or else the newest release of the project's major, found by listing the tags of `zane-lang/compiler` with `git ls-remote`, as `install` does, then moves the project's compiler pin to it: `zane-version` and `zane-commit` together. Resolves the project's graph with that pin first, as `update` does (§3), so a pin older than a package's `zane-version`, or of another major, is refused and nothing is written. It compiles nothing, so a dependency the new compiler cannot build as pinned does not stop it: `zane update` then moves that dependency to a version the compiler builds, and the next build compiles them. When the tag named is the project's current `zane-version`, and that tag now points to another commit than `zane-commit`, the tag has moved: without the flag, `zane toolchain update` refuses it with a security error. |
@@ -540,8 +554,9 @@ which only `zane` reads off the directories, so the contract is:
   number of `MiB` or `GiB`. `zane` passes them only for a
   manifest that sets them; the compiler's default stands for the other.
 - **`--build-argument A`**, any number of times, given to a program's or a
-  test package's build only when the user gives it (§2.3): the arguments
-  the build is started with, which a `comptime` call reads.
+  test package's build, and to each dependency's `--object` build, only
+  when the user gives it (§2.3): the arguments the build is started with,
+  which a `comptime` call reads.
 - **`--check`**, **`--build OUT`**, **`--target T`** and **`--optimize`**.
   `T` is spelled as `zig cc` reads it; the compiler hands LLVM its normal
   form and the C compiler the triple as written.
@@ -562,7 +577,11 @@ which only `zane` reads off the directories, so the contract is:
   each C source holding assembly, and `STEM.c.hashes`, the hashes of the
   packages' C modules, `STEM` being `OUT` without its extension
   ([compiler `ffi.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/ffi.md) F15);
-  each is as much the package's as the object is.
+  each is as much the package's as the object is. When a `comptime` call of
+  the build read the build's arguments, it also writes `STEM.arguments`, an
+  empty file that marks the read
+  ([compiler `comptime.md`](https://github.com/zane-lang/compiler/blob/main/docs/design/comptime.md));
+  `zane` keys the cache on it and links none of it.
   `zane release` packs the first (§4), and a dependency compiled from source
   or a path is the second (§3.1).
 - **`--write-backs OUT`**, given a program's or a test's flags, writes the

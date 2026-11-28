@@ -561,17 +561,21 @@ module Zane::Commands
     end
   end
 
-  # `zane fetch [--target T ...]` (§3): everything a build needs before it
-  # compiles, for each target, so that builds can then run offline.
+  # `zane fetch [--target T ...] [--build-argument A ...]` (§3): everything
+  # a build needs before it compiles, for each target, so that builds can
+  # then run offline. A dependency whose `comptime` calls read the build's
+  # arguments is compiled with those given here, and a build reuses it only
+  # when the build is given the same `--build-argument` values.
   class Fetch < ProjectCommand
     @targets = [] of String
 
     def usage : String
-      "usage: zane fetch [--target TRIPLE ...]"
+      "usage: zane fetch [--target TRIPLE ...] [--build-argument ARGUMENT ...]"
     end
 
     private def options(p : OptionParser) : Nil
       p.on("--target TRIPLE", "A target to fetch for, instead of the host; may be repeated") { |v| @targets << v }
+      build_argument_option(p)
     end
 
     # The project's `test-deps` are fetched as well, so its tests too can
@@ -579,7 +583,7 @@ module Zane::Commands
     def run : Int32
       targets = @targets.empty? ? [Target::HOST] : @targets
       targets.each do |target|
-        test_graph.objects(target, compiler)
+        test_graph.objects(target, compiler, arguments: @build_arguments)
         count = test_graph.linked.size
         @output.puts "Fetched #{count} #{count == 1 ? "package" : "packages"} for #{target}."
       end

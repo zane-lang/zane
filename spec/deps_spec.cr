@@ -128,7 +128,7 @@ private class Registry
   end
 end
 
-DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_ZANEC_C GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 FAKE_WRITE_BACKS FAKE_NO_WRITE_BACKS)
+DEPS_ENV = %w(ZANE_COMPILER FAKE_ZANEC_LOG FAKE_ZANEC_STATUS FAKE_ZANEC_C GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 FAKE_WRITE_BACKS FAKE_NO_WRITE_BACKS FAKE_ZANEC_ARGUMENTS)
 
 private def with_registry(&)
   base = Path[File.join(Dir.tempdir, "zane-spec-deps-#{Random::Secure.hex(6)}")]
@@ -415,6 +415,84 @@ describe Zane::Commands::Add do
         File.read_lines(log).last.should contain(
           "--link #{dir / "package.c.0.o"} --c-hashes #{dir / "package.c.hashes"} --link #{dir / "package.o"}")
       end
+    end
+  end
+
+  it "compiles a dependency from source with the build's arguments, and reuses it for other ones while it reads none" do
+    with_registry do |registry, project, log|
+      registry.publish("math", "v1.0", artifacts: false)
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
+      zane(["build", "--build-argument", "a"], project)[0].should eq 0
+      compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
+      compiled.size.should eq 1
+      compiled[0].should contain "--build-argument a"
+      zane(["build", "--build-argument", "b"], project)[0].should eq 0
+      File.read_lines(log).count(&.starts_with?("--no-root --object")).should eq 1
+    end
+  end
+
+  it "compiles a dependency from source again for other arguments when its `comptime` calls read them" do
+    with_registry do |registry, project, log|
+      ENV["FAKE_ZANEC_ARGUMENTS"] = "1"
+      registry.publish("math", "v1.0", artifacts: false)
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
+      zane(["build", "--build-argument", "a"], project)[0].should eq 0
+      dir = entry("math", "v1.0") / "build-from-source"
+      File.file?(dir / for_program / "package.arguments").should be_true
+      File.read(dir / "#{for_program}.coda").should contain Zane::CacheEntry.arguments_hash(["a"])
+      File.read_lines(log).last.should_not contain ".arguments"
+      zane(["build", "--build-argument", "a"], project)[0].should eq 0
+      File.read_lines(log).count(&.starts_with?("--no-root --object")).should eq 1
+      zane(["build", "--build-argument", "b"], project)[0].should eq 0
+      compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
+      compiled.size.should eq 2
+      compiled.last.should contain "--build-argument b"
+      File.read(dir / "#{for_program}.coda").should contain Zane::CacheEntry.arguments_hash(["b"])
+    end
+  end
+
+  it "compiles a path dependency with the build's arguments and links no marker of their read" do
+    with_registry do |registry, project, log|
+      ENV["FAKE_ZANEC_ARGUMENTS"] = "1"
+      commit = registry.publish("shapes", "v2.0")
+      local = registry.dir / "shapes"
+      File.write(project / "zane.coda", File.read(project / "zane.coda").sub("]", "    shapes v2.0 #{local.relative_to(project).to_posix}\n]"))
+      File.write(project / "zane-lock.coda", File.read(project / "zane-lock.coda").sub(/\]\n\z/, "    shapes #{registry.url("shapes")} #{commit}\n]\n"))
+      zane(["build", "--build-argument", "a"], project)[0].should eq 0
+      File.read_lines(log).select(&.starts_with?("--no-root --object")).last.should contain "--build-argument a"
+      File.read_lines(log).last.should_not contain ".arguments"
+    end
+  end
+
+  it "compiles a release from source when its prebuilt objects read the arguments of the build that made them" do
+    with_registry do |registry, project, log|
+      archive = tar_gz([{"build/", '5', ""}, {"build/math.o", '0', "object math v1.0"}, {"build/math.arguments", '0', ""}])
+      registry.publish("math", "v1.0", archive: archive)
+      zane(["add", registry.url("math")], project)[0].should eq 0
+      status, lines = zane_on_terminal(["build", "--build-argument", "a"], project)
+      status.should eq 0
+      lines.map(&.sub(/ \([^()]*\)\z/, "")).should contain "#{Zane::Progress::DONE} math v1.0's prebuilt objects for #{Zane::Target::HOST} read the arguments of the build that made them; compiling it from source"
+      File.read_lines(log).none?(&.starts_with?("--rewrite")).should be_true
+      compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
+      compiled.size.should eq 1
+      compiled[0].should contain "--build-argument a"
+      File.read_lines(log).last.should contain "--link #{entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST / "package.o"}"
+      File.read(entry("math", "v1.0") / "build" / "#{Zane::Target::HOST}.coda").should contain "arguments"
+      zane(["build", "--build-argument", "a"], project)[0].should eq 0
+      File.read_lines(log).count(&.starts_with?("--no-root --object")).should eq 1
+    end
+  end
+
+  it "fetches a dependency compiled with the arguments a later build reuses" do
+    with_registry do |registry, project, log|
+      ENV["FAKE_ZANEC_ARGUMENTS"] = "1"
+      registry.publish("math", "v1.0", artifacts: false)
+      zane(["add", registry.url("math"), "--from-source"], project)[0].should eq 0
+      zane(["fetch", "--build-argument", "a"], project)[0].should eq 0
+      File.read_lines(log).select(&.starts_with?("--no-root --object")).last.should contain "--build-argument a"
+      ENV["FAKE_NO_WRITE_BACKS"] = "1"
+      zane(["build", "--build-argument", "a"], project)[0].should eq 0
+      File.read_lines(log).count(&.starts_with?("--no-root --object")).should eq 1
     end
   end
 
