@@ -102,6 +102,10 @@ module Zane
     @chosen = {} of String => Package
     # The targets whose objects from the cache the progress display named.
     @noted = Set(String).new
+    # Each release's prebuilt objects for a target, as `CacheEntry#objects`
+    # gave them, nil for one compiled from source instead, by node and
+    # target, so they are fetched once and the fallback is noted once.
+    @prebuilt = {} of {String, String} => {Array(Path), Bool}?
 
     # Reads the graph of *workspace*, whose packages *layout* lays out.
     # *packages* is the cache. When *test*, it is the graph of a test build,
@@ -432,11 +436,25 @@ module Zane
       file.basename.ends_with?(HASHES)
     end
 
-    # Whether `objects` compiles a dependency for the program it links into:
-    # one comes from source or a path, and no remapping moves what its
-    # object names.
-    def compiled_for_program? : Bool
-      @chosen.empty? && linked.any? { |p| !p.from.release? }
+    # Whether `objects` compiles a dependency for the program it links into,
+    # for *target*: one comes from source or a path, or is a release whose
+    # prebuilt objects read the build's arguments, and no remapping moves
+    # what its object names.
+    def compiled_for_program?(target : String, compiler : Compiler) : Bool
+      @chosen.empty? && linked.any? { |p| !p.from.release? || prebuilt(p, target, compiler).nil? }
+    end
+
+    # *package*'s prebuilt objects for *target*, fetched once, or nil when
+    # they read the arguments of the build that made them, which the
+    # progress display notes once.
+    private def prebuilt(package : Package, target : String, compiler : Compiler) : {Array(Path), Bool}?
+      @prebuilt.fetch({package.node, target}) do
+        found = package.entry.not_nil!.objects(package.commit, target, compiler, @workspace.toolchain)
+        unless found
+          Progress.current.note("#{package.key} #{package.tag}'s prebuilt objects for #{target} read the arguments of the build that made them, so it is compiled from source")
+        end
+        @prebuilt[{package.node, target}] = found
+      end
     end
 
     # The compiler's flags for *target*'s objects: `--link` for each, and,
@@ -461,7 +479,10 @@ module Zane
     # are moved to its chosen one (§15.6). Beside a package's objects is
     # the file of its C modules' hashes, when its C has any, which the
     # compiler compares before it inlines the package's C (compiler
-    # docs/design/ffi.md F13, F15); it carries no symbols to remap.
+    # docs/design/ffi.md F13, F15); it carries no symbols to remap. Beside
+    # it may be the compiler's marker that the package's `comptime` calls
+    # read the build's arguments, which the cache keys on and which is
+    # neither linked nor remapped.
     #
     # A dependency compiled for one program, *write_backs* naming the file
     # of the places it writes back into, reads every other place plainly
@@ -491,10 +512,9 @@ module Zane
         entry = p.entry
         case p.from
         in .release?
-          if found = entry.not_nil!.objects(p.commit, target, compiler, @workspace.toolchain)
+          if found = prebuilt(p, target, compiler)
             files, hit = found
           else
-            progress.note("#{p.key} #{p.tag}'s prebuilt objects for #{target} read the arguments of the build that made them; compiling it from source")
             files, hit = from_source(p, target, compiler, places, write_backs, arguments)
           end
           cached << p if hit
@@ -505,7 +525,8 @@ module Zane
           files
         in .path?
           dest = @workspace.out_dir / "deps" / target / p.url.identity_hash / p.tag / "package.o"
-          # The directory holds only this build's files, which are all linked.
+          # The directory holds only this build's files, which are all
+          # linked but the marker of a read of the build's arguments.
           FileUtils.rm_rf(dest.parent)
           Dir.mkdir_p(dest.parent)
           progress.step("Compiling #{p.key} from #{p.layout.root} for #{target}")

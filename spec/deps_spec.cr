@@ -471,12 +471,14 @@ describe Zane::Commands::Add do
       zane(["add", registry.url("math")], project)[0].should eq 0
       status, lines = zane_on_terminal(["build", "--build-argument", "a"], project)
       status.should eq 0
-      lines.map(&.sub(/ \([^()]*\)\z/, "")).should contain "#{Zane::Progress::DONE} math v1.0's prebuilt objects for #{Zane::Target::HOST} read the arguments of the build that made them; compiling it from source"
+      note = "#{Zane::Progress::DONE} math v1.0's prebuilt objects for #{Zane::Target::HOST} read the arguments of the build that made them, so it is compiled from source"
+      lines.map(&.sub(/ \([^()]*\)\z/, "")).count(note).should eq 1
       File.read_lines(log).none?(&.starts_with?("--rewrite")).should be_true
       compiled = File.read_lines(log).select(&.starts_with?("--no-root --object"))
       compiled.size.should eq 1
       compiled[0].should contain "--build-argument a"
-      File.read_lines(log).last.should contain "--link #{entry("math", "v1.0") / "build-from-source" / Zane::Target::HOST / "package.o"}"
+      compiled[0].should contain "--program-write-backs #{project / "out" / "write-backs" / "host-app#{program_suffix}-"}"
+      File.read_lines(log).last.should contain "--link #{entry("math", "v1.0") / "build-from-source" / for_program / "package.o"}"
       File.read(entry("math", "v1.0") / "build" / "#{Zane::Target::HOST}.coda").should contain "arguments"
       zane(["build", "--build-argument", "a"], project)[0].should eq 0
       File.read_lines(log).count(&.starts_with?("--no-root --object")).should eq 1

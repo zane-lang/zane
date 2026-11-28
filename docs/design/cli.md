@@ -213,10 +213,11 @@ range the target system permits. A dependency's manifest cannot set either
 the build is started with, in order: inside a call marked `comptime`, the
 runtime's `arguments` gives them
 ([`effects.md` §5.6](https://github.com/zane-lang/spec/blob/main/spec/effects.md#56-explicit-compile-time-evaluation)).
-`build`, `run`, `test`, `inspect` and `fetch` take it, and pass it to every
-compiler run of the program's or test package's own build, both tiers of
-`run` and `test` included, so the two tiers compute the same values. Each
-dependency compiled from source or a path is compiled with them too.
+`build`, `run`, `test` and `inspect` take it, and pass it to every compiler
+run of the program's or test package's own build, both tiers of `run` and
+`test` included, so the two tiers compute the same values. Each dependency
+compiled from source or a path is compiled with them too, and `fetch` takes
+it for those dependencies alone.
 Only the root package reaches the runtime
 ([`packages.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#61-program-plugin-and-test-packages-are-roots)),
 but an exported lambda has the rights of root-package code wherever it is

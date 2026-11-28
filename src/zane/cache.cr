@@ -256,7 +256,9 @@ module Zane
     # Rewrites every file under *originals* into the same place under
     # *built*: the objects, and the file of their C modules' hashes, whose
     # packages the compiler stamps as it stamps the objects (compiler
-    # docs/design/ffi.md F15).
+    # docs/design/ffi.md F15). `objects` never hands it an archive that
+    # holds the compiler's marker of a read of the build's arguments, which
+    # is no object.
     private def rewrite(originals : Path, built : Path, compiler : Compiler) : Nil
       partial = built.parent / ".#{built.basename}.#{Random::Secure.hex(4)}"
       stamp = @url.stamp(@tag)
