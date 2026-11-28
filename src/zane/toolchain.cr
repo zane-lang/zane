@@ -31,7 +31,7 @@ module Zane::Toolchain
   # Uses the latest published release by default, even when an older compiler
   # is installed or the current project pins another version. *vet* receives the
   # release and the commit its tag points to before anything is downloaded,
-  # and refuses the release by raising. *progress* receives each step as it happens.
+  # and rejects the release by raising. *progress* receives each step as it happens.
   def self.install(tag : String? = nil, dir : Path = Home.toolchains,
                    platform : String = host, vet : (CompilerRelease -> Nil)? = nil,
                    progress : Progress = Progress.current) : CompilerRelease

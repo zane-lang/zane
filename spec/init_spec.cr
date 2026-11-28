@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 # A compiler repository with releases v0.0 through v0.3 (v0.1 annotated), and
-# tags that are not releases. Built once; `ls-remote` reads it like the real one.
+# tags that are not releases. Built once; `ls-remote` reads it like the real compiler repository.
 COMPILER = File.join(Dir.tempdir, "zane-spec-compiler-#{Process.pid}")
 
 private def git(*args, dir = COMPILER) : String
@@ -45,7 +45,7 @@ git("tag", "v0.10", dir: STD_DIR)
 git("tag", "nightly", dir: STD_DIR)
 STD_V010 = git("rev-parse", "HEAD", dir: STD_DIR)
 
-# The package cache of the specs that pass none of their own, never the real one.
+# The package cache of the specs that pass none of their own, never the user's package cache.
 PACKAGES = File.join(Dir.tempdir, "zane-spec-packages-#{Process.pid}")
 
 STD_ENV = %w(GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0)

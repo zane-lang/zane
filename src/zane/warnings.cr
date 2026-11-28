@@ -32,7 +32,7 @@ module Zane
 
     # A diagnostic is a block from its `File "` line to its `Warning:` or
     # `Error:` line; a warning block shown before is dropped. A block that
-    # another `File "` line starts before it ends is passed on as it is.
+    # another `File "` line starts before it ends is passed on unchanged.
     private def line : Nil
       text = @line.to_s
       @line.clear

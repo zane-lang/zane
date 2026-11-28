@@ -44,7 +44,7 @@ module Zane
       [match[1].to_i, match[2].to_i, (match[3]? || "0").to_i]
     end
 
-    # What an update did to the binary at *path*: installed *tag*, found the
+    # The outcome of an update to the binary at *path*: installed *tag*, found the
     # binary already at *tag*, or found the binary newer than the latest release, *tag*. The
     # path is found before the update, since afterwards the running process's
     # own file is gone.
@@ -55,7 +55,7 @@ module Zane
       Newer
     end
 
-    # Installs the release *tag*, or else the latest one when it is newer than
+    # Installs the release *tag*, or else the latest release when it is newer than
     # this binary, over the running executable.
     def self.run(tag : String? = nil, asset : String? = self.asset,
                  progress : Progress = Progress.current) : Result
@@ -159,7 +159,7 @@ module Zane
       end
     end
 
-    # The binary must start on this machine and be the release it claims.
+    # The binary must start on this machine and report the release *tag*.
     def self.check_runs(binary : Path, tag : String) : Nil
       output = IO::Memory.new
       status = begin

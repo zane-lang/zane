@@ -10,4 +10,4 @@ To learn to use `zane`, start with the [Learn pages](https://github.com/zane-lan
 
 ## Maintainers
 
-- [`releasing.md`](releasing.md): how a `zane` release is published, and what the installers do.
+- [`releasing.md`](releasing.md): how a `zane` release is published, and how the installers work.

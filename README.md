@@ -11,12 +11,14 @@ This repository holds **`zane`**, the command you use to work with Zane: it
 creates projects, fetches their dependencies, installs compilers, and builds,
 runs and tests programs.
 
+<!-- The maintainer's note keeps its personal voice. prose-lint: ignore -->
 > [!NOTE]
 > Maintainer here: Zane is still very young and in its experimental phase. This means stuff may break a lot while its major version is zero. I am also using AI heavily to iterate quickly and test out different approaches to problems; again, because Zane is still experimental. However, this doesn't mean I'm not involved. Zane started with the idea…
 >
 > <details>
 > <summary>Read more</summary>
 >
+> <!-- prose-lint: ignore -->
 > …of creating a language that doesn't have GC pauses, doesn't require manual management and doesn't need lifetime annotations (these goals mainly come from audio dsp). In December 2025 I started thinking more seriously about bringing it to life. So that's when I started with the language design. I didn't know much at the time, but as I researched more and more, I gathered a lot of knowledge which ultimately enabled me to make a great language. Once I had too many ideas, I couldn't really spend a lot of time writing nice documents about them. So I decided to use AI to record my ideas in the [spec repo](https://github.com/zane-lang/spec). This also meant that I could now keep the history of my decisions (which I find particularly important) as I didn't need to write them myself. I decided to spend extra time on the spec, as I wanted to have a well thought out language. I spent roughly 3/4 year designing the language, which shows how much thought went into it. The compiler was then made with substantial AI assistance too, because it meant that I had more flexibility in changing things up and I could explore different paths to the destination. Importantly, without AI I wouldn't have had the capacity to make a compiler in the first place, unless I decided to stick with an idea and never change something up, which directly goes against my philosophy.
 >
 > </details>
@@ -57,7 +59,7 @@ Unit main() {
 }
 ```
 
-A few things that stand out:
+A few features that stand out:
 
 - A variable declaration puts the variable's name first and its type second:
   `x Int`, `p Point(…)`. A function declaration starts with its return type:
@@ -90,7 +92,7 @@ On **Windows x86_64**, in PowerShell:
 ```
 
 Both installers check the download's SHA-256 and need no administrator
-access. [`docs/releasing.md`](docs/releasing.md#what-the-installers-do)
+access. [`docs/releasing.md`](docs/releasing.md#how-the-installers-work)
 explains how to install into another directory or install another version. You can also
 take the binaries from [Releases](https://github.com/zane-lang/zane/releases)
 and read the scripts before running them.
@@ -123,8 +125,8 @@ with it (keeping `package hello;` as its first line).
 
 The installer and `zane self update` keep the newest `std` in zane's package
 cache, so `zane init` falls back to it when it cannot reach GitHub; with
-neither, `zane init` stops and says so. After updating from a `zane` older
-than this, run `zane self install-std` once.
+neither, `zane init` stops with an error that names the missing `std`. After
+updating from a `zane` older than this, run `zane self install-std` once.
 `zane init --no-std` creates a project with no dependency, whose code uses
 only the compiler's intrinsics.
 
@@ -138,7 +140,7 @@ zane test
 
 ## Everyday commands
 
-| Command | What it does |
+| Command | Effect |
 |---|---|
 | `zane init [dir]` | Create a project (`--lib` for a library) |
 | `zane check` | Type-check the project without building it |
@@ -155,8 +157,8 @@ zane test
 | `zane self update [version]` | Update `zane` itself |
 
 `zane help` lists every command, and
-[`docs/design/cli.md`](docs/design/cli.md) explains what each command does and
-why.
+[`docs/design/cli.md`](docs/design/cli.md) explains each command's behaviour and
+the reasons for it.
 
 ### Compilers and projects
 

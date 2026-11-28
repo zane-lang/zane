@@ -94,7 +94,8 @@ module Zane
       from.starts_with?("./") || from.starts_with?("../") || from.starts_with?('/')
     end
 
-    # Reads both files in *root*, and refuses them unless they agree.
+    # Reads both files in *root*, and refuses them unless the lock file has a
+    # row for exactly the manifest's dependencies.
     def self.load(root : Path) : Manifest
       path = root / FILE
       raise UserError.new("#{root} holds no #{FILE}") unless File.file?(path)

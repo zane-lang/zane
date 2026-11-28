@@ -23,7 +23,7 @@ module Zane
     # What an installed toolchain records about itself, in its directory.
     RECORD = "toolchain.coda"
 
-    # The release *tag* of the repository at *url*, or the newest one when *tag*
+    # The release *tag* of the repository at *url*, or the newest release when *tag*
     # is nil. A release installed under *toolchains* is taken without going
     # online; otherwise git lists the repository's tags, so no API access is
     # needed.

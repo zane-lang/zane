@@ -109,7 +109,7 @@ module Zane::Commands
     end
 
     # The tags of the repository at *url*, listed as a step of its own,
-    # since git asks the host for them.
+    # since git fetches them from the host.
     private def list_tags(url : PackageUrl) : Hash(String, String)
       progress = Progress.current
       progress.step("Listing the tags of #{url}")
