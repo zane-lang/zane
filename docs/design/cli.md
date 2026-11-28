@@ -217,7 +217,7 @@ runtime's `arguments` gives them
 run of the program's or test package's own build, both tiers of `run` and
 `test` included, so the two tiers compute the same values. Only the root
 package reaches the runtime
-([`packages.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#61-program-and-test-packages-are-roots)),
+([`packages.md` §6.1](https://github.com/zane-lang/spec/blob/main/spec/packages.md#61-program-plugin-and-test-packages-are-roots)),
 so a dependency's marked calls never read the build's arguments, its object
 is compiled without them, and the cache keeps it whatever they are. With
 none given, nothing is passed, so a compiler released before `comptime`
