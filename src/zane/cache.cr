@@ -7,6 +7,7 @@ require "./git"
 require "./home"
 require "./package_url"
 require "./progress"
+require "./sha256"
 
 module Zane
   # One version of one package in the package cache (spec dependencies.md §7):
@@ -19,15 +20,21 @@ module Zane
   #     build/                  its objects, as published
   #   build/<target>/           those objects, rewritten
   #   build/<target>.coda       the record of the commit, target, archive
-  #                             hash and compiler pin they were rewritten from
+  #                             hash and compiler pin they were rewritten
+  #                             from, or that the archive's objects read the
+  #                             arguments of the build that made them
   #   build-from-source/<target>/package.o
   #                             the object compiled from src/ (§12.1), and
   #                             what the compiler writes beside it: the
-  #                             objects of its C holding assembly and the
-  #                             file of its C modules' hashes
+  #                             objects of its C holding assembly, the
+  #                             file of its C modules' hashes, and the
+  #                             marker that its `comptime` calls read the
+  #                             build's arguments
   #   build-from-source/<target>.coda
   #                             the record of the commit, target and
-  #                             compiler pin it was compiled with
+  #                             compiler pin it was compiled with, and,
+  #                             when its `comptime` calls read the build's
+  #                             arguments, the hash of those arguments
   #   build-from-source/<target>.<places>/, <target>.<places>.coda
   #                             the same, compiled for the programs that
   #                             write back into one set of places, the hash
@@ -127,19 +134,51 @@ module Zane
     # package's stamp. The cache reuses them only while they were made from
     # the same commit and archive by the same compiler pin, *toolchain*: its
     # tag and commit (§7).
-    def objects(commit : String, target : String, compiler : Compiler, toolchain : {String, String}) : {Array(Path), Bool}
+    #
+    # Nil when the archive's objects carry the compiler's marker that their
+    # `comptime` calls read the arguments of the build that made them: those
+    # are the publisher's arguments, not this build's, so the package is
+    # compiled from source instead. The record notes it, so a later build
+    # knows without checking the archive again.
+    def objects(commit : String, target : String, compiler : Compiler, toolchain : {String, String}) : {Array(Path), Bool}?
       src = source(commit)
       url, sha256 = artifact(src, target)
       built = @dir / "build" / target
       record = @dir / "build" / "#{target}.coda"
       wanted = {"commit" => commit, "target" => target, "sha256" => sha256,
                 "zane-version" => toolchain[0], "zane-commit" => toolchain[1]}
-      return {files(built), true} if Dir.exists?(built) && read_record(record) == wanted
+      kept = read_record(record)
+      return nil if kept == wanted.merge({"arguments" => "read"})
+      return {files(built), true} if Dir.exists?(built) && kept == wanted
 
       originals = unpacked(target, url, sha256)
+      if files(originals).any? { |f| CacheEntry.arguments?(f) }
+        FileUtils.rm_rf(built)
+        Dir.mkdir_p(record.parent)
+        write_record(record, wanted.merge({"arguments" => "read"}))
+        return nil
+      end
       rewrite(originals, built, compiler)
       write_record(record, wanted)
       {files(built), false}
+    end
+
+    # The name the compiler gives the empty file it writes beside an object
+    # whose `comptime` calls read the build's arguments (compiler
+    # docs/design/comptime.md): the object's name with this in place of
+    # its extension.
+    ARGUMENTS = ".arguments"
+
+    # Whether *file* is the marker of a read of the build's arguments.
+    def self.arguments?(file : Path) : Bool
+      file.basename.ends_with?(ARGUMENTS)
+    end
+
+    # The hash a record keeps of the build's *arguments*, in order. Each
+    # argument is written with its length first, so no two lists of
+    # arguments hash alike by joining alike.
+    def self.arguments_hash(arguments : Array(String)) : String
+      SHA256.hexdigest(arguments.map { |a| "#{a.bytesize}:#{a}" }.join)
     end
 
     # The object compiled from the checkout of *commit* for *target*, for a
@@ -148,10 +187,15 @@ module Zane
     # only while it was compiled, optimized, from the same commit by the same
     # compiler pin, *toolchain*. An object compiled for the programs that
     # write back into the places whose file hashes to *places* is kept apart
-    # from one compiled for any program, and from one for other places. The block
-    # compiles the object to the path it is given. The second value is true
-    # when the cache already held the object.
-    def compiled(commit : String, target : String, toolchain : {String, String}, places : String? = nil, & : Path ->) : {Array(Path), Bool}
+    # from one compiled for any program, and from one for other places. An
+    # object beside which the compiler wrote the marker that its `comptime`
+    # calls read the build's arguments is reused only for the same
+    # *arguments*, whose hash its record keeps; one without the marker is
+    # reused whatever they are. The block compiles the object to the path it
+    # is given. The second value is true when the cache already held the
+    # object.
+    def compiled(commit : String, target : String, toolchain : {String, String}, places : String? = nil,
+                 arguments : Array(String) = [] of String, & : Path ->) : {Array(Path), Bool}
       dir = @dir / "build-from-source"
       slot = places ? "#{target}.#{places[0, 16]}" : target
       built = dir / slot
@@ -160,7 +204,11 @@ module Zane
       wanted = {"commit" => commit, "target" => target, "optimized" => "yes",
                 "zane-version" => toolchain[0], "zane-commit" => toolchain[1]}
       wanted["write-backs"] = places if places
-      return {files(built), true} if File.file?(object) && read_record(record) == wanted
+      read = wanted.merge({"arguments" => CacheEntry.arguments_hash(arguments)})
+      if File.file?(object)
+        kept = read_record(record)
+        return {files(built), true} if kept == wanted || kept == read
+      end
 
       source(commit)
       Dir.mkdir_p(dir)
@@ -170,9 +218,10 @@ module Zane
       progress.step("Compiling #{name} from source for #{target}")
       yield partial / object.basename
       progress.done("Compiled #{name} from source for #{target}")
+      reads = files(partial).any? { |f| CacheEntry.arguments?(f) }
       FileUtils.rm_rf(built)
       File.rename(partial, built)
-      write_record(record, wanted)
+      write_record(record, reads ? read : wanted)
       {files(built), false}
     ensure
       FileUtils.rm_rf(partial) if partial && Dir.exists?(partial)
@@ -207,7 +256,9 @@ module Zane
     # Rewrites every file under *originals* into the same place under
     # *built*: the objects, and the file of their C modules' hashes, whose
     # packages the compiler stamps as it stamps the objects (compiler
-    # docs/design/ffi.md F15).
+    # docs/design/ffi.md F15). `objects` never hands it an archive that
+    # holds the compiler's marker of a read of the build's arguments, which
+    # is no object.
     private def rewrite(originals : Path, built : Path, compiler : Compiler) : Nil
       partial = built.parent / ".#{built.basename}.#{Random::Secure.hex(4)}"
       stamp = @url.stamp(@tag)

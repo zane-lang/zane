@@ -58,8 +58,8 @@ module Zane::Commands
     private def options(p : OptionParser) : Nil
     end
 
-    # `--build-argument ARGUMENT`, which `build`, `run`, `test` and
-    # `inspect` take, any number of times: the arguments the build is started
+    # `--build-argument ARGUMENT`, which `build`, `run`, `test`, `inspect`
+    # and `fetch` take, any number of times: the arguments the build is started
     # with, which the runtime's `arguments` gives inside a call marked
     # `comptime` (spec effects.md §5.6, §6.6).
     private def build_argument_option(p : OptionParser) : Nil
@@ -147,9 +147,10 @@ module Zane::Commands
 
     # A program's build: the program package first, the root, with the
     # project's top-level library packages and its dependencies' public
-    # packages to import, started with the build's arguments. Only the root
-    # reaches the runtime (spec packages.md §6.1), so a dependency's object
-    # never reads them, and the cache keeps it whatever they are.
+    # packages to import, started with the build's arguments. The
+    # dependencies are compiled with them too, since an exported lambda has
+    # the rights of root-package code wherever it is declared (spec
+    # packages.md §6.1, §8.4); `Graph#objects` says how the cache keeps them.
     private def program_build(program : Layout::Program) : Array(String)
       g = graph
       own = layout.program_keys.map { |key, target| {key, target.path} }
@@ -198,7 +199,7 @@ module Zane::Commands
       args = ["--build", path.to_s]
       args.push("--target", target) if target
       args << "--optimize"
-      links = with_write_backs(flags, path, g) { |places| g.link_flags(target || Target::HOST, compiler, hashes: true, write_backs: places) }
+      links = with_write_backs(flags, path, g, target || Target::HOST) { |places| g.link_flags(target || Target::HOST, compiler, hashes: true, write_backs: places, arguments: @build_arguments) }
       summary = "Compiled #{what}, optimized"
       summary += ", with its dependencies' code compiled from source to inline it" unless g.linked.empty?
       Progress.current.run("Compiling #{what}, optimized", summary, @output, diagnostics) do |output, error|
@@ -215,7 +216,7 @@ module Zane::Commands
     private def build_and_run(what : String, flags : Array(String), g : Graph, path : Path, args : Array(String)) : Int32
       Dir.mkdir_p(path.parent)
       compiler = self.compiler
-      links = with_write_backs(flags, path, g) { |places| g.link_flags(Target::HOST, compiler, hashes: false, write_backs: places) }
+      links = with_write_backs(flags, path, g, Target::HOST) { |places| g.link_flags(Target::HOST, compiler, hashes: false, write_backs: places, arguments: @build_arguments) }
       library = tier_library(path)
       tier1 = compiler.start(["--tier-up", library.to_s] + flags)
       begin
@@ -242,8 +243,8 @@ module Zane::Commands
     # dependencies are then compiled for any program. Nil too, and nothing
     # run, when *g* compiles no dependency for the program. The file is
     # removed once the block, which compiles them, is done.
-    private def with_write_backs(flags : Array(String), path : Path, g : Graph, & : Path? -> T) : T forall T
-      return yield nil unless g.compiled_for_program?
+    private def with_write_backs(flags : Array(String), path : Path, g : Graph, target : String, & : Path? -> T) : T forall T
+      return yield nil unless g.compiled_for_program?(target, compiler)
       dir = workspace.out_dir / "write-backs"
       Dir.mkdir_p(dir)
       file = dir / "#{path.parent.basename}-#{path.basename}-#{Random::Secure.hex(8)}"

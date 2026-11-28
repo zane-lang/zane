@@ -2,7 +2,8 @@ require "json"
 
 # Stands in for `zanec` in the specs.
 # - `--rewrite STAMP INPUT OUTPUT` writes the stamp's line followed by the
-#   input.
+#   input. Given the compiler's marker of a read of the build's arguments,
+#   which is no object, the fake compiler exits with status 1 instead.
 # - `--remap FROM TO INPUT OUTPUT` writes a line naming both stamps followed
 #   by the input.
 # - Run as a compiler (any run given `--package`), it appends its arguments
@@ -11,7 +12,9 @@ require "json"
 #   - `--build OUT` copies the fake compiler itself to OUT.
 #   - `--object OUT` writes its arguments to OUT. With `FAKE_ZANEC_C` set, it
 #     also writes beside OUT what a package's C adds: `STEM.c.0.o` and
-#     `STEM.c.hashes`.
+#     `STEM.c.hashes`. With `FAKE_ZANEC_ARGUMENTS` set and a
+#     `--build-argument` given, it writes the empty `STEM.arguments`, as the
+#     compiler does when a `comptime` call reads the build's arguments.
 #   - `--tier-up OUT` writes OUT once it has logged, unless `FAKE_TIER_HANG`
 #     is set, in which case it never finishes.
 #   - `--compile-commands OUT` writes a database of each `.c` file directly in
@@ -49,6 +52,10 @@ elsif ARGV.first? == "--rewrite"
     File.open(log, "a") { |f| f.puts ARGV.join(" ") }
   end
   _, stamp, input, output = ARGV
+  if input.ends_with?(".arguments")
+    STDERR.puts "fake compiler error: #{input} is no object"
+    exit 1
+  end
   File.write(output, "rewritten #{stamp}\n#{File.read(input)}")
 elsif ARGV.first? == "--remap"
   if log = ENV["FAKE_ZANEC_LOG"]?
@@ -78,6 +85,9 @@ elsif ARGV.includes?("--package")
       stem = Path[ARGV[i + 1]].parent / Path[ARGV[i + 1]].stem
       File.write("#{stem}.c.0.o", "assembled")
       File.write("#{stem}.c.hashes", "hashes")
+    end
+    if ENV["FAKE_ZANEC_ARGUMENTS"]? && ARGV.includes?("--build-argument")
+      File.write("#{Path[ARGV[i + 1]].parent / Path[ARGV[i + 1]].stem}.arguments", "")
     end
   end
   if i = ARGV.index("--compile-commands")
